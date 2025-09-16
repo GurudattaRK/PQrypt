@@ -1,0 +1,53 @@
+*.iml
+.gradle
+/local.properties
+/.idea/caches
+/.idea/libraries
+/.idea/modules.xml
+/.idea/workspace.xml
+/.idea/navEditor.xml
+/.idea/assetWizardSettings.xml
+*.DS_Store
+/captures
+.externalNativeBuild
+.cxx
+local.properties
+*target*
+*.lock
+
+# Build outputs
+/android/app/build/
+/android/build/
+/desktop/target/
+
+# Generated files
+*.apk
+*.aab
+*.ap_
+*.dex
+*.class
+
+# Temporary files
+*.tmp
+*.temp
+*.swp
+*~
+
+# OS files
+Thumbs.db
+.DS_Store
+
+# IDE files
+.vscode/
+.idea/
+
+# Rust
+Cargo.lock
+debug/
+target/
+
+# Android
+*.log
+.gradle/
+build/
+local.properties

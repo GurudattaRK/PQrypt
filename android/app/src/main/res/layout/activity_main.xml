@@ -1,0 +1,88 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:padding="24dp"
+    android:gravity="center"
+    android:background="?android:attr/colorBackground"
+    tools:context=".MainActivity">
+
+    <Button
+        android:id="@+id/btn_help"
+        style="@style/Widget.Material3.Button"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="end"
+        android:layout_marginBottom="8dp"
+        android:backgroundTint="#FF9800"
+        android:text="Help?"
+        android:textAppearance="@style/TextAppearance.PQrypt.Button"
+        android:textColor="@android:color/white" />
+
+    <!-- App Logo -->
+    <ImageView
+        android:layout_width="120dp"
+        android:layout_height="120dp"
+        android:layout_marginBottom="16dp"
+        android:src="@drawable/logo"
+        android:contentDescription="PQrypt Logo" />
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="PQrypt"
+        android:textAppearance="@style/TextAppearance.PQrypt.Headline"
+        android:layout_marginBottom="48dp" />
+
+    <Button
+        android:id="@+id/btn_secure_share"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Secure Share"
+        android:textAppearance="@style/TextAppearance.PQrypt.Button"
+        android:padding="16dp"
+        android:layout_marginBottom="16dp"
+        style="@style/Widget.Material3.Button"
+        android:backgroundTint="#9C27B0"
+        android:textColor="@android:color/white" />
+
+    <Button
+        android:id="@+id/btn_file_encryption"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="File Encryption"
+        android:textAppearance="@style/TextAppearance.PQrypt.Button"
+        android:padding="16dp"
+        android:layout_marginBottom="16dp"
+        style="@style/Widget.Material3.Button"
+        android:backgroundTint="#D80000"
+        android:textColor="@android:color/white" />
+
+    <Button
+        android:id="@+id/btn_pqc_key_exchange"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="PQC Key Exchange"
+        android:textAppearance="@style/TextAppearance.PQrypt.Button"
+        android:padding="16dp"
+        android:layout_marginBottom="16dp"
+        style="@style/Widget.Material3.Button"
+        android:backgroundTint="#00AF00"
+        android:textColor="@android:color/white" />
+
+    <Button
+        android:id="@+id/btn_password_vault"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Password Generator"
+        android:textAppearance="@style/TextAppearance.PQrypt.Button"
+        android:padding="16dp"
+        style="@style/Widget.Material3.Button"
+        android:backgroundTint="#00B0F0"
+        android:textColor="@android:color/white" />
+
+</LinearLayout>

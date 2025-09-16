@@ -1,0 +1,186 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:fillViewport="true"
+    tools:context=".SecureShareBluetoothFileActivity">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="24dp">
+
+        <!-- Header -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:layout_marginBottom="24dp">
+
+            <Button
+                android:id="@+id/btn_back"
+                style="@style/Widget.Material3.Button"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:backgroundTint="#9C27B0"
+                android:text="← Back"
+                android:textColor="@android:color/white"
+                android:textSize="14sp" />
+
+            <View
+                android:layout_width="0dp"
+                android:layout_height="1dp"
+                android:layout_weight="1" />
+
+            <Button
+                android:id="@+id/btn_help"
+                style="@style/Widget.Material3.Button"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:backgroundTint="#FF9800"
+                android:text="Help?"
+                android:textColor="@android:color/white"
+                android:textSize="14sp" />
+        </LinearLayout>
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Secure File Share - Bluetooth"
+            android:textSize="24sp"
+            android:textStyle="bold"
+            android:layout_marginBottom="16dp"
+            android:layout_gravity="center_horizontal" />
+
+        <TextView
+            android:id="@+id/tv_role"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Role: Sender"
+            android:textSize="16sp"
+            android:textStyle="bold"
+            android:layout_marginBottom="16dp"
+            android:layout_gravity="center_horizontal" />
+
+        <TextView
+            android:id="@+id/tv_status"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Enable Bluetooth and select a file to share"
+            android:textSize="14sp"
+            android:textColor="#0066cc"
+            android:layout_marginBottom="16dp"
+            android:gravity="center" />
+
+        <!-- File Selection (Sender only) -->
+        <LinearLayout
+            android:id="@+id/ll_file_selection"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:layout_marginBottom="16dp"
+            android:visibility="visible">
+
+            <Button
+                android:id="@+id/btn_choose_file"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Choose File to Share"
+                android:textSize="16sp"
+                android:padding="12dp"
+                android:layout_marginBottom="8dp"
+                style="@style/Widget.Material3.Button"
+                android:backgroundTint="#2196F3"
+                android:textColor="@android:color/white" />
+
+            <TextView
+                android:id="@+id/tv_selected_file"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="No file selected"
+                android:textSize="12sp"
+                android:textColor="#666666"
+                android:layout_marginBottom="16dp" />
+        </LinearLayout>
+
+        <!-- Device Discovery (Sender) / Listen for Connection (Receiver) -->
+        <Button
+            android:id="@+id/btn_discover_connect"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Discover Devices"
+            android:textSize="16sp"
+            android:padding="12dp"
+            android:layout_marginBottom="16dp"
+            android:enabled="false"
+            style="@style/Widget.Material3.Button"
+            android:backgroundTint="#00AF00"
+            android:textColor="@android:color/white" />
+
+
+
+        <!-- Connection Status -->
+        <TextView
+            android:id="@+id/tv_connection_status"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Not connected"
+            android:textSize="14sp"
+            android:textColor="#666666"
+            android:layout_marginBottom="16dp"
+            android:gravity="center" />
+
+        <!-- Transfer Progress -->
+        <LinearLayout
+            android:id="@+id/ll_progress"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:layout_marginBottom="16dp"
+            android:visibility="gone">
+
+            <TextView
+                android:id="@+id/tv_progress_title"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Transfer Progress"
+                android:textSize="16sp"
+                android:textStyle="bold"
+                android:layout_marginBottom="8dp"
+                android:gravity="center" />
+
+            <ProgressBar
+                android:id="@+id/progress_bar"
+                style="?android:attr/progressBarStyleHorizontal"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="8dp"
+                android:max="100"
+                android:progress="0" />
+
+            <TextView
+                android:id="@+id/tv_progress_text"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="0%"
+                android:textSize="12sp"
+                android:textColor="#666666"
+                android:gravity="center" />
+        </LinearLayout>
+
+        <!-- Device List (Sender only) -->
+        <androidx.recyclerview.widget.RecyclerView
+            android:id="@+id/rv_devices"
+            android:layout_width="match_parent"
+            android:layout_height="200dp"
+            android:layout_marginBottom="16dp"
+            android:visibility="gone" />
+
+
+    </LinearLayout>
+</ScrollView>

@@ -1,0 +1,114 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:padding="16dp">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:layout_marginBottom="16dp">
+
+        <Button
+            android:id="@+id/btn_back"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="← Back"
+            android:textSize="16sp"
+            style="@style/Widget.Material3.Button"
+            android:backgroundTint="#BA68C8"
+            android:textColor="@android:color/white" />
+
+        <Space
+            android:layout_width="0dp"
+            android:layout_height="1dp"
+            android:layout_weight="1" />
+
+        <Button
+            android:id="@+id/btn_help"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Help?"
+            style="@style/Widget.Material3.Button"
+            android:backgroundTint="#FF9800"
+            android:textColor="@android:color/white"
+            android:textSize="16sp" />
+    </LinearLayout>
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Key Exchange Process"
+        android:textSize="24sp"
+        android:textStyle="bold"
+        android:layout_marginBottom="16dp" />
+
+    <TextView
+        android:id="@+id/tv_status"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Status: Initializing..."
+        android:textSize="16sp"
+        android:textStyle="bold"
+        android:layout_marginBottom="24dp"
+        android:background="@android:color/holo_red_light"
+        android:padding="12dp"
+        android:textColor="@android:color/white" />
+
+    <Button
+        android:id="@+id/btn_open_key_file"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Open Key File"
+        android:textSize="16sp"
+        android:padding="12dp"
+        android:layout_marginBottom="8dp"
+        android:backgroundTint="#00B0F0"
+        android:textColor="@android:color/white"/>
+
+
+    <TextView
+        android:id="@+id/tv_key_file_path"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="No key file selected"
+        android:textSize="14sp"
+        android:layout_marginBottom="16dp" />
+
+    <Button
+        android:id="@+id/btn_generate_key_file"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Generate Key File"
+        android:textSize="16sp"
+        android:padding="12dp"
+        android:layout_marginBottom="8dp"
+        android:backgroundTint="#00AF00"
+        android:textColor="@android:color/white"/>
+
+    <TextView
+        android:id="@+id/tv_generated_file_path"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="No key file generated yet"
+        android:textSize="14sp"
+        android:layout_marginBottom="16dp" />
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Key Exchange Steps:"
+        android:textSize="16sp"
+        android:textStyle="bold"
+        android:layout_marginBottom="8dp" />
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Sender: 1.key → 2.key → 3.key → final.key\nReceiver: 1.key → 2.key → 3.key → final.key"
+        android:textSize="14sp"
+        android:layout_marginBottom="16dp" />
+
+</LinearLayout>
