@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<issues format="6" by="lint 8.12.0" type="baseline" client="gradle" dependencies="false" name="AGP (8.12.0)" variant="all" version="8.12.0">
+
+    <issue
+        id="MissingPermission"
+        message="Missing permissions required by BluetoothAdapter.getAddress: android.permission.LOCAL_MAC_ADDRESS"
+        errorLine1="            binding.tvDeviceAddress.text = &quot;MAC Address: ${adapter.address ?: &quot;Unknown&quot;}&quot;"
+        errorLine2="                                                           ~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/pineapple/app/BluetoothKeyExchangeActivity.kt"
+            line="244"
+            column="60"/>
+    </issue>
+
+    <issue
+        id="MissingPermission"
+        message="Missing permissions required by BluetoothAdapter.getAddress: android.permission.LOCAL_MAC_ADDRESS"
+        errorLine1="            binding.tvDeviceAddress.text = &quot;MAC Address: ${adapter.address ?: &quot;Unknown&quot;}&quot;"
+        errorLine2="                                                           ~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/pineapple/app/BluetoothKeyExchangeActivity.kt"
+            line="244"
+            column="60"/>
+    </issue>
+
+    <issue
+        id="MissingPermission"
+        message="Call requires permission which may be rejected by user: code should explicitly check to see if permission is available (with `checkPermission`) or explicitly handle a potential `SecurityException`"
+        errorLine1="        bluetoothAdapter?.cancelDiscovery()"
+        errorLine2="        ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/java/com/pineapple/app/BluetoothKeyExchangeActivity.kt"
+            line="725"
+            column="9"/>
+    </issue>
+
+</issues>

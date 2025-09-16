@@ -1,0 +1,49 @@
+[package]
+name = "rusty_api"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["staticlib"]
+
+[profile.release]
+# Optimization settings
+opt-level = 3                    # Maximum optimization
+lto = "fat"                     # Full link-time optimization
+codegen-units = 1               # Single codegen unit for better optimization
+
+# Performance settings
+panic = "abort"                 # Smaller binary, faster execution
+incremental = false            # Disable incremental compilation for release
+overflow-checks = false        # Disable overflow checks for performance
+strip = true                   # Strip debug symbols
+debug = false                  # No debug info for release
+
+# Apply optimizations to all dependencies
+[profile.release.package."*"]
+opt-level = 3                   # Maximum optimization for all dependencies
+
+
+[dependencies]
+libc = "0.2"
+aes-gcm = {version = "0.10.3", features = ["stream"]}
+serpent = "0.5.1"
+x448 = "0.6.0"
+pqcrypto-traits = "0.3.5"
+pqcrypto-hqc = "0.2.2"
+argon2 = "0.5.3"
+rand = "0.8"
+getrandom = "0.2"
+zeroize = "1.7"
+fips203 = "0.4.3"
+p521 = "0.13.0"
+elliptic-curve = { version = "0.13", features = ["ecdh"] }
+bincode = "1.3"
+serde = { version = "1.0", features = ["derive"] }
+serde_arrays = "0.1"
+fips205 = "0.4"
+
+# New dependencies for Threefish-1024 integration
+threefish = "0.5.2"
+cipher = "0.4"
+

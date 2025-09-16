@@ -1,0 +1,20 @@
+# Android backend Rust build: maximize performance per target
+[target.aarch64-linux-android]
+rustflags = [
+  "-C", "codegen-units=1"
+]
+
+[target.armv7-linux-androideabi]
+rustflags = [
+  "-C", "codegen-units=1"
+]
+
+[target.i686-linux-android]
+rustflags = [
+  "-C", "codegen-units=1"
+]
+
+[target.x86_64-linux-android]
+rustflags = [
+  "-C", "codegen-units=1"
+]

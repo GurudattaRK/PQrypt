@@ -1,0 +1,5 @@
+# Host build (rustUI): maximize performance
+[build]
+rustflags = [
+  "-C", "codegen-units=1"
+]

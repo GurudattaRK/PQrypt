@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">PQrypt</string>
+    <string name="autofill_service_description">PQrypt Secure Password Autofill Service</string>
+</resources>

@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:padding="16dp"
+    android:gravity="center">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:layout_marginBottom="16dp">
+
+        <Button
+            android:id="@+id/btn_back"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="← Back"
+            android:textSize="16sp"
+            style="@style/Widget.Material3.Button"
+            android:backgroundTint="#BA68C8"
+            android:textColor="@android:color/white" />
+
+        <Space
+            android:layout_width="0dp"
+            android:layout_height="1dp"
+            android:layout_weight="1" />
+
+        <Button
+            android:id="@+id/btn_help"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Help?"
+            style="@style/Widget.Material3.Button.TextButton" />
+    </LinearLayout>
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="PQC Key Exchange"
+        android:textSize="24sp"
+        android:textStyle="bold"
+        android:layout_marginBottom="48dp" />
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Choose your role in the key exchange:"
+        android:textSize="16sp"
+        android:layout_marginBottom="24dp" />
+
+    <Button
+        android:id="@+id/btn_sender"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Sender"
+        android:textSize="18sp"
+        android:padding="16dp"
+        android:layout_marginBottom="16dp"
+        style="@style/Widget.Material3.Button"
+        android:backgroundTint="#00B0F0"
+        android:textColor="@android:color/white" />
+
+    <Button
+        android:id="@+id/btn_receiver"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Receiver"
+        android:textSize="18sp"
+        android:padding="16dp"
+        style="@style/Widget.Material3.Button"
+        android:backgroundTint="#00B0F0"
+        android:textColor="@android:color/white" />
+
+</LinearLayout>
