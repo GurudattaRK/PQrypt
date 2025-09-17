@@ -11,12 +11,16 @@ extern "C" {
 // Return codes
 #define CRYPTO_SUCCESS 0
 #define CRYPTO_ERROR_NULL_POINTER -1
-#define CRYPTO_ERROR_HASHING_FAILED -6
-#define CRYPTO_ERROR_ENCRYPTION_FAILED -7
-#define CRYPTO_ERROR_DECRYPTION_FAILED -3
-#define CRYPTO_ERROR_KEY_GENERATION_FAILED -8
-#define CRYPTO_ERROR_INVALID_INPUT -4
-#define CRYPTO_ERROR_MEMORY_ALLOCATION -5
+#define CRYPTO_ERROR_HASHING_FAILED -2
+#define CRYPTO_ERROR_ENCRYPTION_FAILED -3
+#define CRYPTO_ERROR_DECRYPTION_FAILED -4
+#define CRYPTO_ERROR_KEY_GENERATION_FAILED -5
+#define CRYPTO_ERROR_INVALID_INPUT -6
+#define CRYPTO_ERROR_MEMORY_ALLOCATION -7
+// Extended errors
+#define CRYPTO_ERROR_IO -10
+#define CRYPTO_ERROR_FORMAT -11
+#define CRYPTO_ERROR_UNSUPPORTED -12
 
 // Core cryptographic functions
 int argon2_hash_c(
@@ -66,6 +70,20 @@ int derive_password_hash_unified_128_c(
     size_t out_len
 );
 
+// Unified password generator (one-shot) with bitmask flags (lowercase/uppercase/digits always included)
+int generate_password_unified_c(
+    const unsigned char* app_name,
+    size_t app_name_len,
+    const unsigned char* app_password,
+    size_t app_password_len,
+    const unsigned char* master_password,
+    size_t master_password_len,
+    size_t desired_len,
+    unsigned int enabled_sets_mask,
+    char* output,
+    size_t* output_len
+);
+
 // Basic key generation functions
 int kyber_keypair_c(
     unsigned char* public_key,
@@ -110,6 +128,55 @@ int pqc_4hybrid_recv_final_c(
     const unsigned char* receiver_state,
     size_t receiver_state_len,
     unsigned char* final_key
+);
+
+// Test function for Rust linkage
+int test_rust_linkage(void);
+
+// Simple test functions
+int test_simple_call(void);
+int triple_encrypt_fd_c_safe(int in_fd, int out_fd);
+
+// New: FD-based file encryption/decryption (PQRYPT2, streaming)
+int triple_encrypt_fd_c(
+    const unsigned char* secret,
+    unsigned long secret_len,  // Changed from size_t to unsigned long
+    int is_keyfile,
+    int in_fd,
+    int out_fd
+);
+
+int triple_decrypt_fd_c(
+    const unsigned char* secret,
+    unsigned long secret_len,  // Changed from size_t to unsigned long
+    int is_keyfile,
+    int in_fd,
+    int out_fd
+);
+
+// New: FD-based PQC 4-hybrid helpers for file-based flows
+int pqc_4hybrid_sender_init_fd_c(
+    int fd_out_1key,
+    int fd_out_sender_state
+);
+
+int pqc_4hybrid_receiver_process1_fd_c(
+    int fd_in_1key,
+    int fd_out_2key,
+    int fd_out_receiver_state
+);
+
+int pqc_4hybrid_sender_process2_fd_c(
+    int fd_in_2key,
+    int fd_in_sender_state,
+    int fd_out_3key,
+    int fd_out_final_key
+);
+
+int pqc_4hybrid_receiver_process3_fd_c(
+    int fd_in_3key,
+    int fd_in_receiver_state,
+    int fd_out_final_key
 );
 
 #ifdef __cplusplus

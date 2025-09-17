@@ -23,6 +23,115 @@ JNI_OnLoad(JavaVM* vm, void* reserved) {
     return JNI_VERSION_1_6;
 }
 
+// =============================
+// New FD-based file crypto APIs
+// =============================
+
+extern "C" JNIEXPORT jint JNICALL
+Java_com_pineapple_app_RustyCrypto_tripleEncryptFd(JNIEnv *env, jclass, jbyteArray secret, jboolean isKeyFile, jint inFd, jint outFd) {
+    __android_log_print(ANDROID_LOG_DEBUG, LOG_TAG, "JNI tripleEncryptFd: ENTRY - inFd=%d, outFd=%d, isKeyFile=%d", (int)inFd, (int)outFd, (int)isKeyFile);
+    
+    if (!secret || inFd < 0 || outFd < 0) {
+        __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, "JNI tripleEncryptFd: Invalid input parameters");
+        return CRYPTO_ERROR_INVALID_INPUT;
+    }
+
+    jsize secretLen = env->GetArrayLength(secret);
+    __android_log_print(ANDROID_LOG_DEBUG, LOG_TAG, "JNI tripleEncryptFd: secretLen=%d", (int)secretLen);
+    
+    jbyte* secretBytes = env->GetByteArrayElements(secret, nullptr);
+    if (!secretBytes || secretLen <= 0) {
+        __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, "JNI tripleEncryptFd: Failed to get secret bytes");
+        if (secretBytes) env->ReleaseByteArrayElements(secret, secretBytes, JNI_ABORT);
+        return CRYPTO_ERROR_INVALID_INPUT;
+    }
+    // Copy to native buffer
+    uint8_t* secretCopy = new uint8_t[secretLen];
+    memcpy(secretCopy, secretBytes, secretLen);
+    // Zero Java array in-place and commit
+    memset(secretBytes, 0, secretLen);
+    env->ReleaseByteArrayElements(secret, secretBytes, 0);
+
+    __android_log_print(ANDROID_LOG_DEBUG, LOG_TAG, "JNI tripleEncryptFd: About to call triple_encrypt_fd_c");
+    __android_log_print(ANDROID_LOG_DEBUG, LOG_TAG, "JNI tripleEncryptFd: Parameters - secretCopy=%p, secretLen=%d, isKeyFile=%d, inFd=%d, outFd=%d", 
+                       secretCopy, (int)secretLen, isKeyFile ? 1 : 0, (int)inFd, (int)outFd);
+    
+    __android_log_print(ANDROID_LOG_DEBUG, LOG_TAG, "JNI tripleEncryptFd: CALLING triple_encrypt_fd_c NOW");
+    int res = triple_encrypt_fd_c(secretCopy, (unsigned long)secretLen, isKeyFile ? 1 : 0, (int)inFd, (int)outFd);
+    __android_log_print(ANDROID_LOG_DEBUG, LOG_TAG, "JNI tripleEncryptFd: triple_encrypt_fd_c returned %d", res);
+    
+    // Zero and free native buffer
+    memset(secretCopy, 0, secretLen);
+    delete [] secretCopy;
+    return res;
+}
+
+extern "C" JNIEXPORT jint JNICALL
+Java_com_pineapple_app_RustyCrypto_tripleDecryptFd(JNIEnv *env, jclass, jbyteArray secret, jboolean isKeyFile, jint inFd, jint outFd) {
+    if (!secret || inFd < 0 || outFd < 0) return CRYPTO_ERROR_INVALID_INPUT;
+
+    jsize secretLen = env->GetArrayLength(secret);
+    jbyte* secretBytes = env->GetByteArrayElements(secret, nullptr);
+    if (!secretBytes || secretLen <= 0) {
+        if (secretBytes) env->ReleaseByteArrayElements(secret, secretBytes, JNI_ABORT);
+        return CRYPTO_ERROR_INVALID_INPUT;
+    }
+    // Copy to native buffer
+    uint8_t* secretCopy = new uint8_t[secretLen];
+    memcpy(secretCopy, secretBytes, secretLen);
+    // Zero Java array in-place and commit
+    memset(secretBytes, 0, secretLen);
+    env->ReleaseByteArrayElements(secret, secretBytes, 0);
+
+    int res = triple_decrypt_fd_c(secretCopy, (size_t)secretLen, isKeyFile ? 1 : 0, (int)inFd, (int)outFd);
+    // Zero and free native buffer
+    memset(secretCopy, 0, secretLen);
+    delete [] secretCopy;
+    return res;
+}
+
+// =====================================
+// Unified password generator (bitmask)
+// =====================================
+
+extern "C" JNIEXPORT jstring JNICALL
+Java_com_pineapple_app_RustyCrypto_generatePasswordUnified(JNIEnv *env, jclass, jbyteArray appName, jbyteArray appPassword, jbyteArray masterPassword, jint desiredLen, jint enabledSetsMask) {
+    if (!appName || !masterPassword || desiredLen <= 0) return nullptr;
+
+    jsize appLen = env->GetArrayLength(appName);
+    jsize pwdLen = appPassword ? env->GetArrayLength(appPassword) : 0;
+    jsize mstLen = env->GetArrayLength(masterPassword);
+
+    jbyte* appBytes = env->GetByteArrayElements(appName, nullptr);
+    jbyte* pwdBytes = appPassword ? env->GetByteArrayElements(appPassword, nullptr) : nullptr;
+    jbyte* mstBytes = env->GetByteArrayElements(masterPassword, nullptr);
+    if (!appBytes || !mstBytes) {
+        if (appBytes) env->ReleaseByteArrayElements(appName, appBytes, JNI_ABORT);
+        if (pwdBytes) env->ReleaseByteArrayElements(appPassword, pwdBytes, JNI_ABORT);
+        if (mstBytes) env->ReleaseByteArrayElements(masterPassword, mstBytes, JNI_ABORT);
+        return nullptr;
+    }
+
+    char outBuf[257];
+    size_t outLen = 0;
+    int res = generate_password_unified_c(
+        reinterpret_cast<const unsigned char*>(appBytes), (size_t)appLen,
+        reinterpret_cast<const unsigned char*>(pwdBytes), (size_t)pwdLen,
+        reinterpret_cast<const unsigned char*>(mstBytes), (size_t)mstLen,
+        (size_t)desiredLen, (unsigned int)enabledSetsMask,
+        outBuf, &outLen);
+
+    // Zero Java arrays in-place
+    memset(appBytes, 0, appLen);
+    env->ReleaseByteArrayElements(appName, appBytes, 0);
+    if (pwdBytes) { memset(pwdBytes, 0, pwdLen); env->ReleaseByteArrayElements(appPassword, pwdBytes, 0); }
+    memset(mstBytes, 0, mstLen);
+    env->ReleaseByteArrayElements(masterPassword, mstBytes, 0);
+
+    if (res != CRYPTO_SUCCESS) return nullptr;
+    return env->NewStringUTF(outBuf);
+}
+
 // (moved below helper functions)
 
 // Helper to get JNIEnv for current thread

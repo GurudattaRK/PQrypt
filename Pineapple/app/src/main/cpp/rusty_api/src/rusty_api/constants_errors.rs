@@ -67,6 +67,9 @@ pub const CRYPTO_ERROR_ENCRYPTION_FAILED: i32 = -3;
 pub const CRYPTO_ERROR_DECRYPTION_FAILED: i32 = -4;
 pub const CRYPTO_ERROR_KEY_GENERATION_FAILED: i32 = -5;
 pub const CRYPTO_ERROR_INVALID_INPUT: i32 = -6;
+pub const CRYPTO_ERROR_IO: i32 = -10;
+pub const CRYPTO_ERROR_FORMAT: i32 = -11;
+pub const CRYPTO_ERROR_UNSUPPORTED: i32 = -12;
 
 // Error types for cryptographic operations
 

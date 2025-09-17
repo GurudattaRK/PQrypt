@@ -1,5 +1,0 @@
-once you have made changes to both apps compile them with the most performance optimizing settings without worrying about sizes or memory like most aggressive compiler optimization, link time optimizations etc for both apps in rust and android build settings.
-i saw this on github page of serpent : "You can modify crate using the following configuration flags:
-serpent_no_unroll: do not unroll rounds loop. Reduces binary size at the cost of slightly lower performance.
-The flag can be enabled using RUSTFLAGS environmental variable (e.g. RUSTFLAGS="--cfg serpent_no_unroll") or by modifying .cargo/config."
-does that also mean there is a way to improve perfromance by unrolling or other performance improving stuff? only let compilers, linkers and other building tools do the optimizations, only changes you are allowed to make are security and safety related.

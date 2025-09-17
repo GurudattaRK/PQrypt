@@ -285,14 +285,21 @@ class PasswordVaultActivity : AppCompatActivity() { // UI to derive, display, an
                 // Store for later use
                 finalPasswordHash = finalHash
                 
-                // Generate password using the final hash
-                Log.d("PasswordVault", "About to call RustyCrypto.generatePasswordSecure")
-                val generatedPassword = RustyCrypto.generatePasswordSecure(
-                    1, // CHARACTER SET mode so settings apply
-                    finalHash,
+                // Generate password using unified API (bitmask for specials)
+                Log.d("PasswordVault", "About to call RustyCrypto.generatePasswordUnified")
+                var specialsMask = 0
+                enabledSpecialSets.forEachIndexed { index, enabled ->
+                    if (enabled) {
+                        specialsMask = specialsMask or (1 shl index)
+                    }
+                }
+                val appPasswordBytes = if (appPassword.isNotEmpty()) appPassword.toByteArray() else null
+                val generatedPassword = RustyCrypto.generatePasswordUnified(
+                    appName.toByteArray(),
+                    appPasswordBytes,
+                    masterPassword.toByteArray(),
                     passwordLength,
-                    enabledSpecialSets, // Pass only the 3 special character sets
-                    appName
+                    specialsMask
                 ) as String?
                 
                 // Switch back to main thread for UI updates

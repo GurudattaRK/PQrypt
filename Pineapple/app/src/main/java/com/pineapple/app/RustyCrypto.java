@@ -28,14 +28,9 @@ public class RustyCrypto { // Public JNI bridge class exposing native crypto met
     public static final int AES256_IV_SIZE = 12; // 96-bit IV/nonce recommended for GCM
     public static final int AES256_TAG_SIZE = 16; // 128-bit authentication tag
     
-    // Core functions with simplified names
+    // Legacy functions - kept for backward compatibility during migration
     public static native byte[] argon2Hash(byte[] password, byte[] salt, int outputLength);
-    public static native byte[] argon2HashWithParams(byte[] password, byte[] salt, int outputLength, int memoryKb, int iterations, int parallelism);
-    public static native byte[] tripleEncrypt(byte[] masterKey, byte[] plaintext);
-    public static native byte[] tripleDecrypt(byte[] masterKey, byte[] input);
-    
     public static native int testCryptoRoundtrip();
-    public static native String generatePasswordSecure(int mode, byte[] hashBytes, int length, boolean[] enabledSets, String userId);
     public static native byte[] derivePasswordHashUnified128(byte[] appName, byte[] appPassword, byte[] masterPassword);
     public static native Object[] kyberKeypair();
     public static native Object[] x448Keypair();
@@ -45,4 +40,9 @@ public class RustyCrypto { // Public JNI bridge class exposing native crypto met
     public static native Object[] pqc4HybridRecv(byte[] hybrid1Key); // Returns [hybrid2Key, receiverState]
     public static native Object[] pqc4HybridSndFinal(byte[] hybrid2Key, byte[] senderState); // Returns [finalKey(128B), hybrid3Key]
     public static native byte[] pqc4HybridRecvFinal(byte[] hybrid3Key, byte[] receiverState); // Returns finalKey(128B)
+
+    // Minimal new surface
+    public static native int tripleEncryptFd(byte[] secret, boolean isKeyFile, int inFd, int outFd);
+    public static native int tripleDecryptFd(byte[] secret, boolean isKeyFile, int inFd, int outFd);
+    public static native String generatePasswordUnified(byte[] appName, byte[] appPassword, byte[] masterPassword, int desiredLen, int enabledSetsMask);
 }

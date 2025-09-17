@@ -26,6 +26,9 @@ opt-level = 3                   # Maximum optimization for all dependencies
 
 [dependencies]
 libc = "0.2"
+android_log = "0.1"
+android_logger = "0.13"
+log = "0.4"
 aes-gcm = {version = "0.10.3", features = ["stream"]}
 serpent = "0.5.1"
 x448 = "0.6.0"
@@ -46,4 +49,11 @@ fips205 = "0.4"
 # New dependencies for Threefish-1024 integration
 threefish = "0.5.2"
 cipher = "0.4"
+
+# Low-level components for streaming AES-GCM (single final tag)
+aes = "0.8"
+ctr = "0.9"
+ghash = "0.5"
+subtle = "2.5"
+universal-hash = "0.5"
 

@@ -4,10 +4,14 @@ import android.app.Activity // For activity result status codes
 import android.content.Intent // To launch pickers and SAF actions
 import android.net.Uri // To reference selected files and tree URIs
 import android.os.Bundle // Activity lifecycle state container
-import android.os.Environment // Access to external storage directories (legacy usage)
-import android.widget.Toast // Brief user-facing notifications
-import androidx.activity.result.contract.ActivityResultContracts // Register-for-activity-result APIs
+import android.os.ParcelFileDescriptor
+import android.provider.DocumentsContract // SAF contract constants/utilities
+import android.provider.OpenableColumns
+import android.util.Log
+import android.widget.Toast
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity // Base class for activities with support features
+import androidx.lifecycle.lifecycleScope
 import androidx.documentfile.provider.DocumentFile // SAF-friendly file/folder abstraction
 import com.pineapple.app.databinding.ActivityFileEncryptionBinding // ViewBinding for activity_file_encryption.xml
 import kotlinx.coroutines.CoroutineScope // Coroutines for async work and debouncing
@@ -17,15 +21,13 @@ import kotlinx.coroutines.delay // Coroutines delay function
 import kotlinx.coroutines.launch // Coroutines for async work and debouncing
 import kotlinx.coroutines.withContext // Coroutines for async work and debouncing
 import java.io.File // File path helper (may be used when resolving names)
-import java.io.FileInputStream // Stream for reading local files
+import java.io.ByteArrayOutputStream // Stream for assembling output bytes
 import java.io.FileOutputStream // Stream for writing local files
 import java.security.SecureRandom // CSPRNG if needed for salts/keys
 import android.text.TextWatcher // Listen to password field changes
 import android.text.Editable // Editable text passed to TextWatcher
-import android.provider.OpenableColumns // For querying display name/size via content resolver
 import javax.crypto.Mac // HMAC used in HKDF operations
 import javax.crypto.spec.SecretKeySpec // Key wrapper for MAC
-import android.provider.DocumentsContract // SAF contract constants/utilities
 
 class FileEncryptionActivity : AppCompatActivity() { // UI for selecting files and encrypting/decrypting them
 
@@ -39,9 +41,11 @@ class FileEncryptionActivity : AppCompatActivity() { // UI for selecting files a
     private var selectedKeyFileUri: Uri? = null // Chosen key file URI
     private var keyFileFirst128: ByteArray? = null // Cached bytes from key file used for derivation
     // Pending output when using the SAF create-document flow
-    private var pendingOutputBytes: ByteArray? = null // Bytes to save after encryption/decryption
-    private var pendingSuggestedName: String? = null // Suggested filename for the create-document dialog
-    private var pendingSuccessToast: String? = null // Message to show after successful save
+    private var pendingOutputBytes: ByteArray? = null // Stash encrypted data for saving
+    private var pendingSuggestedName: String? = null // Stash filename suggestion
+    private var pendingSuccessToast: String? = null // Stash success message
+    private var pendingEncryptionSecret: ByteArray? = null // Secret for streaming encryption
+    private var pendingDecryptionSecret: ByteArray? = null // Secret for streaming decryption to show after successful save
     // Persisted target folder (tree URI) for Option B
     private var pickedFolderUri: Uri? = null // Persisted user-selected output folder URI
     private var pendingAction: String? = null // "encrypt" or "decrypt" action to run after picking folder
@@ -78,8 +82,8 @@ class FileEncryptionActivity : AppCompatActivity() { // UI for selecting files a
                         return@let // Abort
                     }
                     selectedKeyFileUri = uri // Remember the key file URI
-                    // Store full contents; Argon2 can handle arbitrary length as password input
-                    keyFileFirst128 = allBytes // Cache key bytes for derivation
+                    // Store only first 128 bytes for streaming API compatibility
+                    keyFileFirst128 = allBytes.take(128).toByteArray() // Cache first 128 bytes for derivation
                     isUsingKeyFile = true // Switch UI/logic into key-file mode
                     // Derive a session key to enable buttons (real derivation done again with fresh salt per op)
                     deriveKeyFromKeyFilePreview() // Perform preview derivation to enable actions
@@ -119,13 +123,21 @@ class FileEncryptionActivity : AppCompatActivity() { // UI for selecting files a
                 when (pendingAction) { // Resume flow based on pending action
                     "encrypt" -> {
                         pendingAction = null // Clear pending marker
-                        binding.tvOutputPath.text = "Processing your file please wait...." // UX feedback
+                        val inputFileName = getFileNameFromUri(selectedFileUri!!) ?: "file"
+                        val outputFileName = "${inputFileName}.pqrypt2"
+                        binding.tvOutputPath.text = "Encrypting to: $outputFileName" // Show actual output filename
                         Toast.makeText(this, "Encryption started", Toast.LENGTH_SHORT).show() // Notify user
                         performEncryption() // Continue with encryption
                     }
                     "decrypt" -> {
                         pendingAction = null // Clear pending marker
-                        binding.tvOutputPath.text = "Processing your file please wait...." // UX feedback
+                        val inputFileName = getFileNameFromUri(selectedFileUri!!) ?: "file"
+                        val outputFileName = if (inputFileName.endsWith(".pqrypt2")) {
+                            inputFileName.removeSuffix(".pqrypt2")
+                        } else {
+                            "${inputFileName}.decrypted"
+                        }
+                        binding.tvOutputPath.text = "Decrypting to: $outputFileName" // Show actual output filename
                         Toast.makeText(this, "Decryption started", Toast.LENGTH_SHORT).show() // Notify user
                         performDecryption() // Continue with decryption
                     }
@@ -264,7 +276,9 @@ class FileEncryptionActivity : AppCompatActivity() { // UI for selecting files a
                                 pendingAction = "encrypt" // Remember desired action
                                 launchPickFolder() // Ask user to choose folder
                             } else {
-                                binding.tvOutputPath.text = "Processing your file please wait...." // Inform user
+                                val inputFileName = getFileNameFromUri(selectedFileUri!!) ?: "file"
+                                val outputFileName = "${inputFileName}.pqrypt2"
+                                binding.tvOutputPath.text = "Encrypting to: $outputFileName" // Show actual output filename
                                 Toast.makeText(this@FileEncryptionActivity, "Encryption started", Toast.LENGTH_SHORT).show() // UX feedback
                                 performEncryption() // Begin encryption workflow
                             }
@@ -279,7 +293,9 @@ class FileEncryptionActivity : AppCompatActivity() { // UI for selecting files a
                         pendingAction = "encrypt"
                         launchPickFolder()
                     } else {
-                        binding.tvOutputPath.text = "Processing your file please wait...."
+                        val inputFileName = getFileNameFromUri(selectedFileUri!!) ?: "file"
+                        val outputFileName = "${inputFileName}.pqrypt2"
+                        binding.tvOutputPath.text = "Encrypting to: $outputFileName"
                         Toast.makeText(this, "Encryption started", Toast.LENGTH_SHORT).show()
                         performEncryption()
                     }
@@ -313,7 +329,13 @@ class FileEncryptionActivity : AppCompatActivity() { // UI for selecting files a
                                 pendingAction = "decrypt" // Remember desired action
                                 launchPickFolder() // Ask user to choose folder
                             } else {
-                                binding.tvOutputPath.text = "Processing your file please wait...." // Inform user
+                                val inputFileName = getFileNameFromUri(selectedFileUri!!) ?: "file"
+                                val outputFileName = if (inputFileName.endsWith(".pqrypt2")) {
+                                    inputFileName.removeSuffix(".pqrypt2")
+                                } else {
+                                    "${inputFileName}.decrypted"
+                                }
+                                binding.tvOutputPath.text = "Decrypting to: $outputFileName" // Show actual output filename
                                 Toast.makeText(this@FileEncryptionActivity, "Decryption started", Toast.LENGTH_SHORT).show() // UX feedback
                                 performDecryption() // Begin decryption workflow
                             }
@@ -437,202 +459,250 @@ class FileEncryptionActivity : AppCompatActivity() { // UI for selecting files a
     }
 
     private fun performEncryption() {
-        CoroutineScope(Dispatchers.IO).launch { // Run encryption off the main thread
-            val startTime = System.currentTimeMillis() // Track timing
+        CoroutineScope(Dispatchers.IO).launch {
+            val startTime = System.currentTimeMillis()
             try {
-                android.util.Log.d("FileEncryption", "Starting encryption process") // Trace start
-                val inputStream = contentResolver.openInputStream(selectedFileUri!!) // Open input stream for chosen file
-                val fileBytes = inputStream?.readBytes() // Read entire file into memory
-                inputStream?.close() // Close stream to free resources
-                android.util.Log.d("FileEncryption", "File read, size: ${fileBytes?.size}") // Log size info
-
-                if (fileBytes != null && (passwordKey != null || isUsingKeyFile)) { // Ensure we have input and some key source
-                    // Check file size for chunked processing
-                    val maxSinglePassSize = 128 * 1024 * 1024 // 128MB
-                    if (fileBytes.size > maxSinglePassSize) {
-                        withContext(Dispatchers.Main) {
-                            Toast.makeText(this@FileEncryptionActivity, "File too large (${fileBytes.size / (1024*1024)}MB). Maximum supported: 128MB", Toast.LENGTH_LONG).show()
-                        }
-                        return@launch
-                    }
-                    // Derive deterministic key with NO SALT
-                    val fixedSalt = ByteArray(0) // Empty salt indicates PQRYPT deterministic mode
-                    android.util.Log.d("FileEncryption", "Encryption - Salt size: ${fixedSalt.size}, isUsingKeyFile: $isUsingKeyFile")
-                    val argonOut = if (isUsingKeyFile) { // Choose derivation source based on mode
-                        val keySrc = keyFileFirst128 // Use cached key-file bytes
-                            ?: throw IllegalStateException("No key file bytes available") // Safety check
-                        android.util.Log.d("FileEncryption", "Encryption - Using key file, keySrc size: ${keySrc.size}")
-                        RustyCrypto.argon2Hash(keySrc, fixedSalt, 128) // Derive 128 bytes
-                    } else {
-                        val password = binding.etPassword.text.toString() // Read password text
-                        if (password.isEmpty()) { // Ensure non-empty password
-                            withContext(Dispatchers.Main) {
-                                Toast.makeText(this@FileEncryptionActivity, "Please enter a password", Toast.LENGTH_SHORT).show() // Prompt user
-                            }
-                            return@launch // Abort encryption
-                        }
-                        android.util.Log.d("FileEncryption", "Encryption - Using password, length: ${password.length}")
-                        RustyCrypto.argon2Hash(password.toByteArray(), fixedSalt, 128) // Derive 128 bytes
-                    }
-                    if (argonOut == null || argonOut.size != 128) throw IllegalStateException("Argon2(128) failed during encryption") // Validate output
-                    // Use Argon2 output directly for master key (saltless)
-                    passwordKey = argonOut // Cache derived key for this session
-                    currentSalt = null // No salt used in PQRYPT
-
-                    android.util.Log.d("FileEncryption", "Derived master key for encryption (no salt)") // Trace
-                    // Encrypt entire file using combined triple encrypt: returns IV||ciphertext(padded)||TAG
-                    val totalLength = fileBytes.size // Original plaintext length
-                    android.util.Log.d("FileEncryption", "About to call RustyCrypto.tripleEncrypt with key size: ${passwordKey!!.size}, data size: $totalLength")
-                    val blob = RustyCrypto.tripleEncrypt(passwordKey!!, fileBytes) // Perform native encryption
-                        ?: throw IllegalStateException("Encryption failed (null blob)") // Ensure success
-                    android.util.Log.d("FileEncryption", "tripleEncrypt completed, blob size: ${blob.size}")
-                    val ciphertextLen = blob.size - RustyCrypto.AES256_IV_SIZE - RustyCrypto.AES256_TAG_SIZE // Exclude IV/TAG
-                    val chunkCount = if (ciphertextLen <= 0) 0 else (ciphertextLen / 128) // Compute 128-byte chunk count
-
-                    // Assemble output bytes (header + blob) then prompt/save
-                    val baos = java.io.ByteArrayOutputStream() // Buffer to assemble output
-                    // New magic header without SALT (deterministic KDF)
-                    baos.write("PQRYPT\n".toByteArray()) // Magic identifier line
-                    baos.write(totalLength.toString().toByteArray()) // Original length line
-                    baos.write("\n".toByteArray()) // Newline separator
-                    baos.write(chunkCount.toString().toByteArray()) // Number of 128B chunks line
-                    baos.write("\n".toByteArray()) // Newline separator
-                    baos.write(blob) // Append IV||ciphertext||TAG
-                    val outputBytes = baos.toByteArray() // Final encrypted bytes
-
-                    val inputFileName = getFileNameFromUri(selectedFileUri!!) ?: "encrypted_file" // Suggest based on input
-                    val suggestedName = "${inputFileName}.encrypted" // Append .encrypted suffix
-
-                    val totalTime = System.currentTimeMillis() - startTime // Calculate total time
-                    withContext(Dispatchers.Main) { // Switch to UI to handle save flow
-                        pendingOutputBytes = outputBytes // Stash output for saving
-                        pendingSuggestedName = suggestedName // Stash filename suggestion
-                        pendingSuccessToast = "File encrypted in ${totalTime}ms (${String.format("%.2f", totalTime/1000.0)}s)" // Configure success message with timing
-                        // If folder chosen (Option B), save directly; else prompt to pick folder
-                        if (pickedFolderUri != null) {
-                            saveToPickedFolder() // Direct save
-                        } else {
-                            launchPickFolder() // Ask user to choose destination
-                        }
-                    }
+                android.util.Log.d("FileEncryption", "Starting streaming encryption")
+                
+                // Derive secret from password or key file
+                val secret = if (isUsingKeyFile) {
+                    val keyBytes = keyFileFirst128 ?: throw IllegalStateException("No key file bytes available")
+                    // Ensure we only use first 128 bytes for streaming API compatibility
+                    if (keyBytes.size > 128) keyBytes.take(128).toByteArray() else keyBytes
                 } else {
-                    android.util.Log.e("FileEncryption", "fileBytes or passwordKey is null") // Log missing prerequisites
+                    val derivedKey = passwordKey ?: throw IllegalStateException("No password key available")
+                    derivedKey
                 }
-            } catch (e: Exception) { // Catch and report any errors
-                android.util.Log.e("FileEncryption", "Encryption error: ${e.message}", e) // Log with stacktrace
+                
+                // Get input file name for output suggestion
+                val inputFileName = getFileNameFromUri(selectedFileUri!!) ?: "encrypted_file"
+                val suggestedName = "${inputFileName}.pqrypt2"
+                
                 withContext(Dispatchers.Main) {
-                    Toast.makeText(this@FileEncryptionActivity, "Encryption error: ${e.message}", Toast.LENGTH_SHORT).show() // Notify user
+                    // Store encryption parameters for save flow
+                    pendingEncryptionSecret = secret
+                    pendingSuggestedName = suggestedName
+                    pendingSuccessToast = "File encrypted in streaming mode"
+                    
+                    // Launch folder picker or save directly
+                    if (pickedFolderUri != null) {
+                        saveEncryptedToPickedFolder()
+                    } else {
+                        launchPickFolderForEncryption()
+                    }
+                }
+                
+            } catch (e: Exception) {
+                android.util.Log.e("FileEncryption", "Encryption error: ${e.message}", e)
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(this@FileEncryptionActivity, "Encryption error: ${e.message}", Toast.LENGTH_SHORT).show()
                 }
             }
         }
     }
 
-    private fun performDecryption() { // Decrypt selected file using derived key
-        CoroutineScope(Dispatchers.IO).launch { // Run off the main thread
-            val startTime = System.currentTimeMillis() // Track timing
+    private fun performDecryption() {
+        CoroutineScope(Dispatchers.IO).launch {
+            val startTime = System.currentTimeMillis()
             try {
-                // Create debug log file
-                val debugFile = File(filesDir, "decrypt_debug.log")
-                debugFile.writeText("Decryption Debug Log - ${System.currentTimeMillis()}\n")
-                android.util.Log.d("FileEncryption", "Debug log created at: ${debugFile.absolutePath}")
+                android.util.Log.d("FileEncryption", "Starting streaming decryption")
                 
-                android.util.Log.d("FileEncryption", "Starting decryption process") // Trace start
-                val inputStream = contentResolver.openInputStream(selectedFileUri!!) // Open encrypted input
-                val fileBytes = inputStream?.readBytes() // Load entire file into memory
-                inputStream?.close() // Close input stream
-                android.util.Log.d("FileEncryption", "File read, size: ${fileBytes?.size}") // Log size
-
-                if (fileBytes != null && passwordKey != null) {
-                    // Check file size for chunked processing
-                    val maxSinglePassSize = 128 * 1024 * 1024 // 128MB
-                    if (fileBytes.size > maxSinglePassSize) {
-                        withContext(Dispatchers.Main) {
-                            Toast.makeText(this@FileEncryptionActivity, "Encrypted file too large (${fileBytes.size / (1024*1024)}MB). Maximum supported: 128MB", Toast.LENGTH_LONG).show()
-                        }
-                        return@launch
-                    }
-                    android.util.Log.d("FileEncryption", "Password key size: ${passwordKey!!.size}")
-                    // Parse header from raw bytes to avoid charset issues
-                    val headerInfo = parseHeader(fileBytes) // Decode PQrypt header
-                    val originalLength = headerInfo.originalLength // Expected plaintext length
-                    val numChunks = headerInfo.numChunks // 128-byte chunks count (diagnostic)
-                    val binaryStart = headerInfo.binaryStart // Offset where blob begins
-                    val binaryData = fileBytes.sliceArray(binaryStart until fileBytes.size) // Extract IV||cipher||TAG
-                    android.util.Log.d("FileEncryption", "Header parsed: originalLength=$originalLength, numChunks=$numChunks, binaryStart=$binaryStart") // Trace
-
-                    // Re-derive key with NO SALT for PQRYPT
-                    val salt = headerInfo.salt ?: ByteArray(0) // Use empty salt for PQRYPT (saltless)
-                    android.util.Log.d("FileEncryption", "Salt size: ${salt.size}, isUsingKeyFile: $isUsingKeyFile")
-                    val argonOut = if (isUsingKeyFile) {
-                        val keySrc = keyFileFirst128
-                            ?: throw IllegalStateException("No key file bytes available")
-                        android.util.Log.d("FileEncryption", "Using key file, keySrc size: ${keySrc.size}")
-                        RustyCrypto.argon2Hash(keySrc, salt, 128)
-                    } else {
-                        val password = binding.etPassword.text.toString() // Read password text
-                        if (password.isEmpty()) { // Abort if empty
-                            withContext(Dispatchers.Main) {
-                                Toast.makeText(this@FileEncryptionActivity, "Please enter a password", Toast.LENGTH_SHORT).show() // Prompt user
-                            }
-                            return@launch // Exit coroutine
-                        }
-                        android.util.Log.d("FileEncryption", "Using password, length: ${password.length}")
-                        RustyCrypto.argon2Hash(password.toByteArray(), salt, 128) // Derive 128 bytes via Argon2
-                    }
-                    if (argonOut == null || argonOut.size != 128) throw IllegalStateException("Argon2(128) failed during decryption") // Validate length
-                    // Use Argon2 output directly for master key (saltless)
-                    passwordKey = argonOut // Cache derived key
-                    currentSalt = if (salt.isNotEmpty()) salt else null
-                    android.util.Log.d("FileEncryption", "Re-derived master key (saltless for PQRYPT)") // Trace
-
-                    // Combined triple decrypt: feed entire blob (IV||ciphertext||TAG)
-                    android.util.Log.d("FileEncryption", "About to call RustyCrypto.tripleDecrypt with key size: ${passwordKey!!.size}, binary data size: ${binaryData.size}")
-                    
-                    // Log the first few bytes of the key and data for debugging
-                    val keyPreview = passwordKey!!.take(16).joinToString(" ") { "%02x".format(it) }
-                    val dataPreview = binaryData.take(16).joinToString(" ") { "%02x".format(it) }
-                    android.util.Log.d("FileEncryption", "Key preview (first 16 bytes): $keyPreview")
-                    android.util.Log.d("FileEncryption", "Data preview (first 16 bytes): $dataPreview")
-                    debugFile.appendText("Key preview: $keyPreview\n")
-                    debugFile.appendText("Data preview: $dataPreview\n")
-                    
-                    val combined = RustyCrypto.tripleDecrypt(passwordKey!!, binaryData) // Run native decrypt
-                        ?: throw IllegalStateException("Decryption failed (null result)") // Ensure success
-                    android.util.Log.d("FileEncryption", "tripleDecrypt completed, result size: ${combined.size}")
-                    android.util.Log.d("FileEncryption", "Decryption completed, trimming to original length") // Info
-                    val decryptedFile = if (originalLength <= combined.size) { // Trim padding if any
-                        combined.copyOfRange(0, originalLength) // Slice to original length
-                    } else { // Safety fallback if header length was larger than data
-                        combined // Use as-is
-                    }
-
-                    val inputFileName = getFileNameFromUri(selectedFileUri!!) ?: "decrypted_file" // Determine base name
-                    val suggestedName = if (inputFileName.endsWith(".encrypted")) { // Prefer removing known suffix
-                        inputFileName.removeSuffix(".encrypted") // Restore original name
-                    } else {
-                        "${inputFileName}.decrypted" // Append suffix for clarity
-                    }
-
-                    val totalTime = System.currentTimeMillis() - startTime // Calculate total time
-                    withContext(Dispatchers.Main) { // Switch back to UI to finalize output flow
-                        pendingOutputBytes = decryptedFile // Stash bytes for saving
-                        pendingSuggestedName = suggestedName // Stash suggested filename
-                        pendingSuccessToast = "File decrypted in ${totalTime}ms (${String.format("%.2f", totalTime/1000.0)}s)" // Message with timing
-                        if (pickedFolderUri != null) { // If user already chose an output folder
-                            saveToPickedFolder() // Save directly
-                        } else {
-                            launchPickFolder() // Ask user to choose folder
-                        }
-                    }
+                // Derive secret from password or key file
+                val secret = if (isUsingKeyFile) {
+                    val keyBytes = keyFileFirst128 ?: throw IllegalStateException("No key file bytes available")
+                    // Ensure we only use first 128 bytes for streaming API compatibility
+                    if (keyBytes.size > 128) keyBytes.take(128).toByteArray() else keyBytes
                 } else {
-                    android.util.Log.e("FileEncryption", "fileBytes or passwordKey is null")
+                    val derivedKey = passwordKey ?: throw IllegalStateException("No password key available")
+                    derivedKey
                 }
+                
+                // Get input file name for output suggestion
+                val inputFileName = getFileNameFromUri(selectedFileUri!!) ?: "decrypted_file"
+                val suggestedName = if (inputFileName.endsWith(".pqrypt2")) {
+                    inputFileName.removeSuffix(".pqrypt2")
+                } else {
+                    "${inputFileName}.decrypted"
+                }
+                
+                withContext(Dispatchers.Main) {
+                    // Store decryption parameters for save flow
+                    pendingDecryptionSecret = secret
+                    pendingSuggestedName = suggestedName
+                    pendingSuccessToast = "File decrypted in streaming mode"
+                    
+                    // Launch folder picker or save directly
+                    if (pickedFolderUri != null) {
+                        saveDecryptedToPickedFolder()
+                    } else {
+                        launchPickFolderForDecryption()
+                    }
+                }
+                
             } catch (e: Exception) {
                 android.util.Log.e("FileEncryption", "Decryption error: ${e.message}", e)
                 withContext(Dispatchers.Main) {
                     Toast.makeText(this@FileEncryptionActivity, "Decryption error: ${e.message}", Toast.LENGTH_SHORT).show()
                 }
             }
+        }
+    }
+
+    // New FD-based streaming functions
+    private fun launchPickFolderForEncryption() {
+        pendingAction = "encrypt"
+        launchPickFolder()
+    }
+    
+    private fun launchPickFolderForDecryption() {
+        pendingAction = "decrypt"
+        launchPickFolder()
+    }
+    
+    private fun saveEncryptedToPickedFolder() {
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                val secret = pendingEncryptionSecret ?: return@launch
+                val suggestedName = pendingSuggestedName ?: "encrypted.pqrypt2"
+                
+                // Create output file in picked folder
+                val outputUri = createFileInFolder(pickedFolderUri!!, suggestedName)
+                    ?: throw IllegalStateException("Failed to create output file")
+                
+                // Open file descriptors for streaming
+                val inputFd = contentResolver.openFileDescriptor(selectedFileUri!!, "r")
+                    ?: throw IllegalStateException("Failed to open input file")
+                val outputFd = contentResolver.openFileDescriptor(outputUri, "w")
+                    ?: throw IllegalStateException("Failed to open output file")
+                
+                try {
+                    val startTime = System.currentTimeMillis()
+                    
+                    // Update UI to show processing with output path
+                    withContext(Dispatchers.Main) {
+                        val outputPath = getFileNameFromUri(outputUri) ?: suggestedName
+                        binding.tvOutputPath.text = "Encrypting to: $outputPath"
+                    }
+                    
+                    // Debug logging
+                    android.util.Log.d("FileEncryption", "Secret length: ${secret.size}, isKeyFile: $isUsingKeyFile")
+                    android.util.Log.d("FileEncryption", "Input FD: ${inputFd.fd}, Output FD: ${outputFd.fd}")
+                    
+                    // Call streaming encryption
+                    val result = RustyCrypto.tripleEncryptFd(secret, isUsingKeyFile, inputFd.fd, outputFd.fd)
+                    android.util.Log.d("FileEncryption", "Encryption result code: $result")
+                    
+                    if (result != 0) {
+                        throw IllegalStateException("Encryption failed with code: $result")
+                    }
+                    
+                    val elapsedTime = System.currentTimeMillis() - startTime
+                    val elapsedSeconds = elapsedTime / 1000.0
+                    
+                    withContext(Dispatchers.Main) {
+                        val outputPath = getFileNameFromUri(outputUri) ?: suggestedName
+                        binding.tvOutputPath.text = "✅ Encrypted to: $outputPath (${String.format("%.1f", elapsedSeconds)}s)"
+                        Toast.makeText(this@FileEncryptionActivity, "File encrypted in ${String.format("%.1f", elapsedSeconds)}s", Toast.LENGTH_SHORT).show()
+                        clearPendingState()
+                    }
+                } finally {
+                    inputFd.close()
+                    outputFd.close()
+                }
+                
+            } catch (e: Exception) {
+                android.util.Log.e("FileEncryption", "Streaming encryption error: ${e.message}", e)
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(this@FileEncryptionActivity, "Encryption error: ${e.message}", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+    }
+    
+    private fun saveDecryptedToPickedFolder() {
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                val secret = pendingDecryptionSecret ?: return@launch
+                val suggestedName = pendingSuggestedName ?: "decrypted.bin"
+                
+                // Create output file in picked folder
+                val outputUri = createFileInFolder(pickedFolderUri!!, suggestedName)
+                    ?: throw IllegalStateException("Failed to create output file")
+                
+                // Open file descriptors for streaming
+                val inputFd = contentResolver.openFileDescriptor(selectedFileUri!!, "r")
+                    ?: throw IllegalStateException("Failed to open input file")
+                val outputFd = contentResolver.openFileDescriptor(outputUri, "w")
+                    ?: throw IllegalStateException("Failed to open output file")
+                
+                try {
+                    val startTime = System.currentTimeMillis()
+                    
+                    // Update UI to show processing with output path
+                    withContext(Dispatchers.Main) {
+                        val outputPath = getFileNameFromUri(outputUri) ?: suggestedName
+                        binding.tvOutputPath.text = "Decrypting to: $outputPath"
+                    }
+                    
+                    // Call streaming decryption
+                    val result = RustyCrypto.tripleDecryptFd(secret, isUsingKeyFile, inputFd.fd, outputFd.fd)
+                    if (result != 0) {
+                        // Delete partial output on failure
+                        try {
+                            contentResolver.delete(outputUri, null, null)
+                        } catch (deleteEx: Exception) {
+                            android.util.Log.w("FileEncryption", "Failed to delete partial output: ${deleteEx.message}")
+                        }
+                        throw IllegalStateException("Decryption failed with code: $result")
+                    }
+                    
+                    val elapsedTime = System.currentTimeMillis() - startTime
+                    val elapsedSeconds = elapsedTime / 1000.0
+                    
+                    withContext(Dispatchers.Main) {
+                        val outputPath = getFileNameFromUri(outputUri) ?: suggestedName
+                        binding.tvOutputPath.text = "✅ Decrypted to: $outputPath (${String.format("%.1f", elapsedSeconds)}s)"
+                        Toast.makeText(this@FileEncryptionActivity, "File decrypted in ${String.format("%.1f", elapsedSeconds)}s", Toast.LENGTH_SHORT).show()
+                        clearPendingState()
+                    }
+                } finally {
+                    inputFd.close()
+                    outputFd.close()
+                }
+                
+            } catch (e: Exception) {
+                android.util.Log.e("FileEncryption", "Streaming decryption error: ${e.message}", e)
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(this@FileEncryptionActivity, "Decryption error: ${e.message}", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+    }
+    
+    private fun clearPendingState() {
+        pendingEncryptionSecret?.fill(0) // Zero sensitive data
+        pendingDecryptionSecret?.fill(0)
+        pendingEncryptionSecret = null
+        pendingDecryptionSecret = null
+        pendingSuggestedName = null
+        pendingSuccessToast = null
+    }
+    
+    private fun createFileInFolder(folderUri: Uri, fileName: String): Uri? {
+        return try {
+            val docUri = DocumentsContract.buildDocumentUriUsingTree(
+                folderUri,
+                DocumentsContract.getTreeDocumentId(folderUri)
+            )
+            DocumentsContract.createDocument(
+                contentResolver,
+                docUri,
+                "application/octet-stream",
+                fileName
+            )
+        } catch (e: Exception) {
+            android.util.Log.e("FileEncryption", "Failed to create file in folder: ${e.message}", e)
+            null
         }
     }
 

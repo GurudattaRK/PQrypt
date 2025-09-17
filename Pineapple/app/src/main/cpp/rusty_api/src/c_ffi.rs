@@ -1,13 +1,51 @@
 use std::ffi::CString;
 use std::os::raw::{c_char, c_int, c_uchar};
-use std::slice;
 use std::ptr;
-use libc::size_t;
-use crate::rusty_api::constants_errors::{CRYPTO_SUCCESS, CRYPTO_ERROR_NULL_POINTER, CRYPTO_ERROR_HASHING_FAILED, CRYPTO_ERROR_ENCRYPTION_FAILED, CRYPTO_ERROR_DECRYPTION_FAILED, CRYPTO_ERROR_KEY_GENERATION_FAILED, CRYPTO_ERROR_INVALID_INPUT};
+use std::slice;
+use std::os::unix::io::FromRawFd;
+use libc::{self, size_t};
+use log::{debug, error, info, warn, Level};
+use android_logger::{Config, FilterBuilder};
+use crate::rusty_api::api::{*, triple_decrypt_fd_raw};
+use crate::rusty_api::constants_errors::{CryptoError, *};
 use crate::rusty_api::symmetric::argon2id_hash;
-use crate::rusty_api::api::{triple_encrypt, triple_decrypt, generate_password};
 use crate::rusty_api::asymmetric::{crypto_kyber1024_keypair, crypto_x448_keypair};
 use crate::rusty_api::hybrid::{pqc_4hybrid_init, pqc_4hybrid_recv, pqc_4hybrid_snd_final, pqc_4hybrid_recv_final, HybridSenderState, HybridReceiverState};
+
+// Direct NDK logging as alternative to rust log crate
+extern "C" {
+    fn __android_log_print(prio: c_int, tag: *const c_char, fmt: *const c_char, ...) -> c_int;
+}
+
+const ANDROID_LOG_DEBUG: c_int = 3;
+const ANDROID_LOG_ERROR: c_int = 6;
+
+fn ndk_log_debug(msg: &str) {
+    let tag = CString::new("RustyCrypto-NDK").unwrap();
+    let message = CString::new(msg).unwrap();
+    unsafe {
+        __android_log_print(ANDROID_LOG_DEBUG, tag.as_ptr(), message.as_ptr());
+    }
+}
+
+fn ndk_log_error(msg: &str) {
+    let tag = CString::new("RustyCrypto-NDK").unwrap();
+    let message = CString::new(msg).unwrap();
+    unsafe {
+        __android_log_print(ANDROID_LOG_ERROR, tag.as_ptr(), message.as_ptr());
+    }
+}
+
+// Initialize Android logger - call once at library load
+#[no_mangle]
+pub extern "C" fn init_rust_logger() {
+    android_logger::init_once(
+        Config::default()
+            .with_max_level(log::LevelFilter::Debug)
+            .with_tag("RustyCrypto")
+    );
+    info!("Rust logger initialized");
+}
 
 // Argon2 password hashing - true variable-length output
 #[no_mangle]
@@ -48,6 +86,265 @@ pub extern "C" fn argon2_hash_c(
 
     unsafe { ptr::copy_nonoverlapping(out_vec.as_ptr(), output, output_len); }
     CRYPTO_SUCCESS
+}
+
+// =============================
+// Unified password generator (bitmask) - one-shot native
+// =============================
+
+#[no_mangle]
+pub extern "C" fn generate_password_unified_c(
+    app_name: *const c_uchar,
+    app_name_len: usize,
+    app_password: *const c_uchar,
+    app_password_len: usize,
+    master_password: *const c_uchar,
+    master_password_len: usize,
+    desired_len: usize,
+    enabled_sets_mask: u32,
+    output: *mut c_char,
+    output_len: *mut size_t,
+) -> c_int {
+    if app_name.is_null() || master_password.is_null() || output.is_null() || output_len.is_null() {
+        return CRYPTO_ERROR_NULL_POINTER;
+    }
+
+    // Copy inputs into slices
+    let app_name_slice = unsafe { slice::from_raw_parts(app_name, app_name_len) };
+    let app_password_slice = if !app_password.is_null() && app_password_len > 0 {
+        unsafe { slice::from_raw_parts(app_password, app_password_len) }
+    } else { &[][..] };
+    let master_password_slice = unsafe { slice::from_raw_parts(master_password, master_password_len) };
+
+    // Salts (distinct labels)
+    let mut app_salt = [0u8; 32]; app_salt[0]=b'a'; app_salt[1]=b'p'; app_salt[2]=b'p';
+    let mut mst_salt = [0u8; 32]; mst_salt[0]=b'm'; mst_salt[1]=b's'; mst_salt[2]=b't';
+    let mut pwd_salt = [0u8; 32]; pwd_salt[0]=b'p'; pwd_salt[1]=b'w'; pwd_salt[2]=b'd';
+
+    // Argon2 parameters for PASSWORD GENERATOR (mem=16 MiB, time=3, lanes=1)
+    let mem_kib: u32 = 16 * 1024;
+    let time_cost: u32 = 3;
+    let lanes: u32 = 1;
+
+    // Derivation chain to 128 bytes
+    let app_name_hash = match argon2id_hash(app_name_slice, &app_salt, 128, mem_kib, time_cost, lanes) {
+        Ok(h) => h, Err(_) => return CRYPTO_ERROR_HASHING_FAILED,
+    };
+    let master_hash = match argon2id_hash(master_password_slice, &mst_salt, 128, mem_kib, time_cost, lanes) {
+        Ok(h) => h, Err(_) => return CRYPTO_ERROR_HASHING_FAILED,
+    };
+    let mut combined_salt = [0u8; 32];
+    combined_salt[..16].copy_from_slice(&master_hash[..16]);
+    let mut final_hash = match argon2id_hash(&app_name_hash, &combined_salt, 128, mem_kib, time_cost, lanes) {
+        Ok(h) => h, Err(_) => return CRYPTO_ERROR_HASHING_FAILED,
+    };
+    if !app_password_slice.is_empty() {
+        let pwd_hash = match argon2id_hash(app_password_slice, &pwd_salt, 128, mem_kib, time_cost, lanes) {
+            Ok(h) => h, Err(_) => return CRYPTO_ERROR_HASHING_FAILED,
+        };
+        let mut final_salt = [0u8; 32];
+        final_salt[..16].copy_from_slice(&pwd_hash[..16]);
+        final_hash = match argon2id_hash(&final_hash, &final_salt, 128, mem_kib, time_cost, lanes) {
+            Ok(h) => h, Err(_) => return CRYPTO_ERROR_HASHING_FAILED,
+        };
+    }
+
+    // Bitmask -> [bool;3] for the 3 special sets
+    let enabled_bool = [
+        (enabled_sets_mask & 0b001) != 0,
+        (enabled_sets_mask & 0b010) != 0,
+        (enabled_sets_mask & 0b100) != 0,
+    ];
+
+    // Generate password (mode 1 => charset mode)
+    let password = match generate_password(1, &final_hash, desired_len, &enabled_bool) {
+        Some(p) => p,
+        None => return CRYPTO_ERROR_KEY_GENERATION_FAILED,
+    };
+
+    let password_cstr = match CString::new(password) {
+        Ok(s) => s,
+        Err(_) => return CRYPTO_ERROR_INVALID_INPUT,
+    };
+    let bytes = password_cstr.as_bytes_with_nul();
+    unsafe {
+        *output_len = (bytes.len() - 1) as size_t;
+        ptr::copy_nonoverlapping(bytes.as_ptr() as *const c_char, output, bytes.len());
+    }
+    CRYPTO_SUCCESS
+}
+
+// =============================
+// FD-based file crypto wrappers
+// =============================
+
+#[no_mangle]
+pub extern "C" fn test_rust_linkage() -> c_int {
+    ndk_log_debug("NDK: TEST: Rust linkage works!");
+    debug!("TEST: Rust linkage works!");
+    42
+}
+
+#[no_mangle]
+pub extern "C" fn test_simple_call() -> c_int {
+    ndk_log_debug("NDK: Simple test function called");
+    123
+}
+
+#[no_mangle]
+pub extern "C" fn triple_encrypt_fd_c_safe(
+    in_fd: c_int,
+    out_fd: c_int,
+) -> c_int {
+    ndk_log_debug("NDK: SAFE FFI FUNCTION ENTRY");
+    ndk_log_debug(&format!("NDK: Safe function called with in_fd={}, out_fd={}", in_fd, out_fd));
+    
+    // Try a minimal test without complex parameters
+    let result = std::panic::catch_unwind(|| {
+        ndk_log_debug("NDK: Inside safe function panic handler");
+        
+        // Test file descriptor access using raw syscalls only
+        ndk_log_debug("NDK: Testing FD access with raw syscalls only - no File objects");
+        
+        // Test basic FD validity without creating File objects
+        let test_result = unsafe {
+            let mut test_buf = [0u8; 1];
+            libc::read(in_fd, test_buf.as_mut_ptr() as *mut libc::c_void, 0)
+        };
+        
+        if test_result >= 0 {
+            ndk_log_debug("NDK: FD test passed - using raw syscalls only");
+        }
+        
+        ndk_log_debug("NDK: Safe function completed successfully");
+        42
+    });
+    
+    match result {
+        Ok(code) => {
+            ndk_log_debug("NDK: Safe function panic handler completed");
+            code
+        },
+        Err(_) => {
+            ndk_log_error("NDK: Safe function panicked!");
+            -1
+        }
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn triple_encrypt_fd_c(
+    secret: *const c_uchar,
+    secret_len: std::os::raw::c_ulong,
+    is_keyfile: c_int,
+    in_fd: c_int,
+    out_fd: c_int,
+) -> c_int {
+    ndk_log_debug("NDK: RUST FFI FUNCTION ENTRY - triple_encrypt_fd_c called");
+    
+    let result = std::panic::catch_unwind(|| {
+        ndk_log_debug("NDK: Inside panic handler");
+        
+        // Initialize logger if not already done
+        android_logger::init_once(
+            Config::default()
+                .with_max_level(log::LevelFilter::Debug)
+                .with_tag("RustyCrypto")
+        );
+        
+        ndk_log_debug(&format!("NDK: Logger initialized, params: secret_len={}, is_keyfile={}, in_fd={}, out_fd={}", secret_len, is_keyfile, in_fd, out_fd));
+        debug!("C FFI ENTRY: secret_len={}, is_keyfile={}, in_fd={}, out_fd={}", secret_len, is_keyfile, in_fd, out_fd);
+        
+        if secret.is_null() || secret_len == 0 || secret_len > 4096 || in_fd < 0 || out_fd < 0 {
+            ndk_log_error("NDK: C FFI: Invalid input validation failed");
+            return CRYPTO_ERROR_INVALID_INPUT;
+        }
+        ndk_log_debug("NDK: C FFI: Input validation passed");
+        
+        let secret_slice = unsafe { slice::from_raw_parts(secret, secret_len as usize) };
+        ndk_log_debug("NDK: C FFI: Created secret slice");
+        
+        // Use raw FD approach to avoid File::drop conflicts with Android fdsan
+        ndk_log_debug("NDK: C FFI: Using raw FD approach to avoid File object conflicts");
+        ndk_log_debug(&format!("NDK: C FFI: Calling triple_encrypt_fd_raw with in_fd={}, out_fd={}", in_fd, out_fd));
+        
+        let result = triple_encrypt_fd_raw(secret_slice, is_keyfile != 0, in_fd, out_fd);
+        ndk_log_debug(&format!("NDK: C FFI: triple_encrypt_fd returned: {:?}", result));
+        
+        match result {
+            Ok(_) => {
+                ndk_log_debug("NDK: C FFI: triple_encrypt_fd completed successfully");
+                CRYPTO_SUCCESS
+            },
+            Err(e) => {
+                ndk_log_error(&format!("NDK: C FFI: triple_encrypt_fd failed with error: {:?}", e));
+                match e {
+                    crate::rusty_api::constants_errors::CryptoError::InvalidInput => CRYPTO_ERROR_INVALID_INPUT,
+                    crate::rusty_api::constants_errors::CryptoError::HashingFailed | crate::rusty_api::constants_errors::CryptoError::KeyDerivationFailed => CRYPTO_ERROR_HASHING_FAILED,
+                    crate::rusty_api::constants_errors::CryptoError::EncryptionFailed => CRYPTO_ERROR_ENCRYPTION_FAILED,
+                    crate::rusty_api::constants_errors::CryptoError::AuthenticationFailed => CRYPTO_ERROR_DECRYPTION_FAILED,
+                    _ => CRYPTO_ERROR_IO,
+                }
+            }
+        }
+    });
+    
+    match result {
+        Ok(code) => {
+            ndk_log_debug("NDK: C FFI: Panic handler completed successfully");
+            code
+        },
+        Err(_) => {
+            ndk_log_error("NDK: C FFI: Function panicked!");
+            CRYPTO_ERROR_IO
+        }
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn triple_decrypt_fd_c(
+    secret: *const c_uchar,
+    secret_len: std::os::raw::c_ulong,
+    is_keyfile: c_int,
+    in_fd: c_int,
+    out_fd: c_int,
+) -> c_int {
+    unsafe {
+        __android_log_print(6 as i32, c"PQrypt".as_ptr(), 
+                           c"triple_encrypt_fd_c: FUNCTION ENTRY - this should appear in logs!".as_ptr());
+    }
+    
+    if secret.is_null() || secret_len == 0 || secret_len > 4096 || in_fd < 0 || out_fd < 0 {
+        unsafe {
+            __android_log_print(3 as i32, c"PQrypt".as_ptr(), 
+                               c"triple_encrypt_fd_c: INVALID INPUT".as_ptr());
+        }
+        return CRYPTO_ERROR_INVALID_INPUT;
+    }
+    let secret_slice = unsafe { slice::from_raw_parts(secret, secret_len as usize) };
+    
+    // Use raw FD operations to avoid Rust File::drop conflicts with Android fdsan
+    unsafe {
+        __android_log_print(4 as i32, c"PQrypt".as_ptr(), 
+                           c"triple_encrypt_fd_c: using raw FD approach - in=%d, out=%d".as_ptr(), in_fd, out_fd);
+    }
+
+    // Use raw FD approach to match encryption and avoid File object conflicts
+    unsafe {
+        __android_log_print(4 as i32, c"PQrypt".as_ptr(), 
+                           c"triple_decrypt_fd_c: using triple_decrypt_fd_raw".as_ptr());
+    }
+    
+    match triple_decrypt_fd_raw(secret_slice, is_keyfile != 0, in_fd, out_fd) {
+        Ok(_) => CRYPTO_SUCCESS,
+        Err(e) => match e {
+            crate::rusty_api::constants_errors::CryptoError::InvalidInput => CRYPTO_ERROR_INVALID_INPUT,
+            crate::rusty_api::constants_errors::CryptoError::HashingFailed | crate::rusty_api::constants_errors::CryptoError::KeyDerivationFailed => CRYPTO_ERROR_HASHING_FAILED,
+            crate::rusty_api::constants_errors::CryptoError::EncryptionFailed => CRYPTO_ERROR_ENCRYPTION_FAILED,
+            crate::rusty_api::constants_errors::CryptoError::AuthenticationFailed => CRYPTO_ERROR_DECRYPTION_FAILED,
+            _ => CRYPTO_ERROR_IO,
+        }
+    }
 }
 
 // Unified 128-byte password derivation (all steps Argon2id -> 128 bytes)
