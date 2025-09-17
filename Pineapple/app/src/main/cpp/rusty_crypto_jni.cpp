@@ -23,6 +23,8 @@ JNI_OnLoad(JavaVM* vm, void* reserved) {
     return JNI_VERSION_1_6;
 }
 
+// (moved below helper functions)
+
 // Helper to get JNIEnv for current thread
 static JNIEnv* getEnv() {
     JNIEnv* env = nullptr;
@@ -70,6 +72,43 @@ static jbyteArray bytesToJbyteArray(JNIEnv *env, const uint8_t *bytes, jsize len
     }
     
     return result;
+}
+
+// Unified 128-byte password derivation JNI (placed after helper functions)
+extern "C" JNIEXPORT jbyteArray JNICALL
+Java_com_pineapple_app_RustyCrypto_derivePasswordHashUnified128(JNIEnv *env, jclass clazz, jbyteArray appName, jbyteArray appPassword, jbyteArray masterPassword) {
+    if (!appName || !masterPassword) {
+        return nullptr;
+    }
+
+    jsize appLen = 0, pwdLen = 0, masterLen = 0;
+    uint8_t *appBytes = jbyteArrayToBytes(env, appName, &appLen);
+    uint8_t *pwdBytes = jbyteArrayToBytes(env, appPassword, &pwdLen);
+    uint8_t *masterBytes = jbyteArrayToBytes(env, masterPassword, &masterLen);
+
+    if (!appBytes || !masterBytes) {
+        if (appBytes) delete[] appBytes;
+        if (pwdBytes) delete[] pwdBytes;
+        if (masterBytes) delete[] masterBytes;
+        return nullptr;
+    }
+
+    uint8_t out[128];
+    size_t out_len = 128;
+    int res = derive_password_hash_unified_128_c(appBytes, appLen,
+                                                 pwdBytes, pwdLen,
+                                                 masterBytes, masterLen,
+                                                 out, out_len);
+
+    delete[] appBytes;
+    delete[] pwdBytes;
+    delete[] masterBytes;
+
+    if (res != CRYPTO_SUCCESS) {
+        return nullptr;
+    }
+
+    return bytesToJbyteArray(env, out, 128);
 }
 
 // Core JNI functions - simplified names

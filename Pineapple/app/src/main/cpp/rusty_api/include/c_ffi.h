@@ -54,6 +54,18 @@ int generate_password_c(
     size_t* output_len
 );
 
+// Unified 128-byte password derivation
+int derive_password_hash_unified_128_c(
+    const unsigned char* app_name,
+    size_t app_name_len,
+    const unsigned char* app_password,
+    size_t app_password_len,
+    const unsigned char* master_password,
+    size_t master_password_len,
+    unsigned char* out,
+    size_t out_len
+);
+
 // Basic key generation functions
 int kyber_keypair_c(
     unsigned char* public_key,

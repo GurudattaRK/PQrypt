@@ -32,7 +32,10 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:text="Help?"
-            style="@style/Widget.Material3.Button.TextButton" />
+            style="@style/Widget.Material3.Button"
+            android:backgroundTint="#FF9800"
+            android:textColor="@android:color/white"
+            android:textSize="16sp" />
     </LinearLayout>
 
     <TextView

@@ -9,7 +9,7 @@ use crate::rusty_api::api::{triple_encrypt, triple_decrypt, generate_password};
 use crate::rusty_api::asymmetric::{crypto_kyber1024_keypair, crypto_x448_keypair};
 use crate::rusty_api::hybrid::{pqc_4hybrid_init, pqc_4hybrid_recv, pqc_4hybrid_snd_final, pqc_4hybrid_recv_final, HybridSenderState, HybridReceiverState};
 
-// Argon2 password hashing
+// Argon2 password hashing - true variable-length output
 #[no_mangle]
 pub extern "C" fn argon2_hash_c(
     password: *const c_uchar,
@@ -19,7 +19,7 @@ pub extern "C" fn argon2_hash_c(
     output: *mut c_uchar,
     output_len: usize,
 ) -> c_int {
-    if password.is_null() || output.is_null() {
+    if password.is_null() || output.is_null() || output_len == 0 {
         return CRYPTO_ERROR_NULL_POINTER;
     }
 
@@ -30,54 +30,84 @@ pub extern "C" fn argon2_hash_c(
         salt_array[..salt_slice.len()].copy_from_slice(salt_slice);
     }
 
-    // Use Argon2 parameters per app policy
-    // 10MB memory, 2 iterations, 1 thread
-    // Always use 32-byte output from Argon2, then extend if needed
-    use argon2::{Argon2, Algorithm, Version, Params, PasswordHasher};
-    use argon2::password_hash::SaltString;
-    
-    let params = Params::new(10240, 2, 1, Some(32)).unwrap(); // Fixed 32-byte output
-    let argon2 = Argon2::new(Algorithm::Argon2id, Version::V0x13, params);
-    
-    // SaltString expects exactly 16 bytes, so take first 16 bytes of salt_array
-    let salt_16 = &salt_array[..16];
-    let salt_string = match SaltString::encode_b64(salt_16) {
-        Ok(s) => s,
+    use argon2::{Argon2, Algorithm, Version, Params};
+
+    // 10MB memory, 2 iterations, 1 thread, caller-specified output length
+    let params = match Params::new(10240, 2, 1, Some(output_len)) {
+        Ok(p) => p,
         Err(_) => return CRYPTO_ERROR_HASHING_FAILED,
     };
-    
-    match argon2.hash_password(password_slice, &salt_string) {
-        Ok(password_hash) => {
-            if let Some(hash_bytes) = password_hash.hash {
-                let hash_slice = hash_bytes.as_bytes();
-                
-                // Ensure we have valid hash data and output buffer
-                if output_len == 0 || hash_slice.is_empty() {
-                    return CRYPTO_ERROR_HASHING_FAILED;
-                }
-                
-                // Argon2 gives us exactly 32 bytes, extend safely if more needed
-                unsafe {
-                    if output_len <= 32 {
-                        // Simple case: just copy what we need
-                        ptr::copy_nonoverlapping(hash_slice.as_ptr(), output, output_len);
-                    } else {
-                        // Copy the full 32 bytes first
-                        ptr::copy_nonoverlapping(hash_slice.as_ptr(), output, 32);
-                        
-                        // Extend by cycling through the 32-byte hash for remaining bytes
-                        for i in 32..output_len {
-                            *output.add(i) = hash_slice[i % 32];
-                        }
-                    }
-                }
-                CRYPTO_SUCCESS
-            } else {
-                CRYPTO_ERROR_HASHING_FAILED
-            }
-        },
-        Err(_) => CRYPTO_ERROR_HASHING_FAILED,
+    let argon2 = Argon2::new(Algorithm::Argon2id, Version::V0x13, params);
+
+    // Use first 16 bytes of salt for compatibility across platforms
+    let salt16 = &salt_array[..16];
+    let mut out_vec = vec![0u8; output_len];
+    if argon2.hash_password_into(password_slice, salt16, &mut out_vec).is_err() {
+        return CRYPTO_ERROR_HASHING_FAILED;
     }
+
+    unsafe { ptr::copy_nonoverlapping(out_vec.as_ptr(), output, output_len); }
+    CRYPTO_SUCCESS
+}
+
+// Unified 128-byte password derivation (all steps Argon2id -> 128 bytes)
+#[no_mangle]
+pub extern "C" fn derive_password_hash_unified_128_c(
+    app_name: *const c_uchar,
+    app_name_len: usize,
+    app_password: *const c_uchar,
+    app_password_len: usize,
+    master_password: *const c_uchar,
+    master_password_len: usize,
+    out: *mut c_uchar,
+    out_len: usize,
+) -> c_int {
+    if app_name.is_null() || master_password.is_null() || out.is_null() || out_len < 128 {
+        return CRYPTO_ERROR_NULL_POINTER;
+    }
+
+    let app_name_slice = unsafe { slice::from_raw_parts(app_name, app_name_len) };
+    let app_password_slice = if !app_password.is_null() && app_password_len > 0 {
+        unsafe { slice::from_raw_parts(app_password, app_password_len) }
+    } else { &[][..] };
+    let master_password_slice = unsafe { slice::from_raw_parts(master_password, master_password_len) };
+
+    // salts "app", "mst", "pwd"
+    let mut app_salt = [0u8; 32]; app_salt[0]=b'a'; app_salt[1]=b'p'; app_salt[2]=b'p';
+    let mut mst_salt = [0u8; 32]; mst_salt[0]=b'm'; mst_salt[1]=b's'; mst_salt[2]=b't';
+    let mut pwd_salt = [0u8; 32]; pwd_salt[0]=b'p'; pwd_salt[1]=b'w'; pwd_salt[2]=b'd';
+
+    // Step 1: app name hash (128 bytes)
+    let app_name_hash = match argon2id_hash(app_name_slice, &app_salt, 128, 10240, 2, 1) {
+        Ok(h) => h, Err(_) => return CRYPTO_ERROR_HASHING_FAILED,
+    };
+
+    // Step 2: master password hash (128 bytes)
+    let master_hash = match argon2id_hash(master_password_slice, &mst_salt, 128, 10240, 2, 1) {
+        Ok(h) => h, Err(_) => return CRYPTO_ERROR_HASHING_FAILED,
+    };
+
+    // Step 3: rehash app_name_hash with first 16 bytes of master_hash as salt -> 128 bytes
+    let mut combined_salt = [0u8; 32];
+    combined_salt[..16].copy_from_slice(&master_hash[..16]);
+    let mut final_hash = match argon2id_hash(&app_name_hash, &combined_salt, 128, 10240, 2, 1) {
+        Ok(h) => h, Err(_) => return CRYPTO_ERROR_HASHING_FAILED,
+    };
+
+    // Step 4: optional app password rehash with first 16 bytes of its hash as salt -> 128 bytes
+    if !app_password_slice.is_empty() {
+        let pwd_hash = match argon2id_hash(app_password_slice, &pwd_salt, 128, 10240, 2, 1) {
+            Ok(h) => h, Err(_) => return CRYPTO_ERROR_HASHING_FAILED,
+        };
+        let mut final_salt = [0u8; 32];
+        final_salt[..16].copy_from_slice(&pwd_hash[..16]);
+        final_hash = match argon2id_hash(&final_hash, &final_salt, 128, 10240, 2, 1) {
+            Ok(h) => h, Err(_) => return CRYPTO_ERROR_HASHING_FAILED,
+        };
+    }
+
+    unsafe { ptr::copy_nonoverlapping(final_hash.as_ptr(), out, 128); }
+    CRYPTO_SUCCESS
 }
 
 // Triple encryption (AES + Serpent + ChaCha20)

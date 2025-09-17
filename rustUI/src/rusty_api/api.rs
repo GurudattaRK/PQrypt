@@ -20,6 +20,39 @@ struct TripleCipherKeys {
     tf_key_128: [u8; 128],
 }
 
+// Unified 128-byte password derivation: each step outputs 128 bytes
+pub fn derive_password_hash_unified_128(
+    app_name: &str,
+    app_password: &str,
+    master_password: &str,
+) -> Result<Vec<u8>, CryptoError> {
+    // Salts: "app", "mst", "pwd" in first 3 bytes of 32-byte salt
+    let mut app_salt = [0u8; 32]; app_salt[0] = b'a'; app_salt[1] = b'p'; app_salt[2] = b'p';
+    let mut mst_salt = [0u8; 32]; mst_salt[0] = b'm'; mst_salt[1] = b's'; mst_salt[2] = b't';
+    let mut pwd_salt = [0u8; 32]; pwd_salt[0] = b'p'; pwd_salt[1] = b'w'; pwd_salt[2] = b'd';
+
+    // Step 1: 128-byte hash of app_name
+    let app_name_hash = argon2id_hash(app_name.as_bytes(), &app_salt, 128, 10240, 2, 1)?;
+
+    // Step 2: 128-byte hash of master_password
+    let master_hash = argon2id_hash(master_password.as_bytes(), &mst_salt, 128, 10240, 2, 1)?;
+
+    // Step 3: rehash app_name_hash with first 16 bytes of master_hash as salt -> 128 bytes
+    let mut combined_salt = [0u8; 32];
+    combined_salt[..16].copy_from_slice(&master_hash[..16]);
+    let mut out_hash = argon2id_hash(&app_name_hash, &combined_salt, 128, 10240, 2, 1)?;
+
+    // Step 4: If app_password present, rehash with first 16 bytes of its 128-byte hash as salt
+    if !app_password.is_empty() {
+        let pwd_hash = argon2id_hash(app_password.as_bytes(), &pwd_salt, 128, 10240, 2, 1)?;
+        let mut final_salt = [0u8; 32];
+        final_salt[..16].copy_from_slice(&pwd_hash[..16]);
+        out_hash = argon2id_hash(&out_hash, &final_salt, 128, 10240, 2, 1)?;
+    }
+
+    Ok(out_hash)
+}
+
 impl TripleCipherKeys {
     #[inline]
     fn derive_from_master(master_key: &[u8; 128]) -> Result<Self, CryptoError> {
@@ -348,22 +381,13 @@ pub fn argon2_hash_mobile_compat(
     let salt16 = &salt_buf[..16];
 
     // Fixed 32-byte Argon2id output with updated memory cost (10MB)
-    let params = Params::new(10240, 2, 1, Some(32)).map_err(|_| CryptoError::InvalidParameters)?;
+    let params = Params::new(10240, 2, 1, Some(output_len)).map_err(|_| CryptoError::InvalidParameters)?;
     let argon2 = Argon2::new(Algorithm::Argon2id, Version::V0x13, params);
-    let mut base = [0u8; 32];
-    argon2.hash_password_into(password, salt16, &mut base)
+    let mut out = vec![0u8; output_len];
+    argon2
+        .hash_password_into(password, salt16, &mut out)
         .map_err(|_| CryptoError::HashingFailed)?;
-
-    // Extend by repeating if caller requests more than 32
-    if output_len <= 32 {
-        Ok(base[..output_len].to_vec())
-    } else {
-        let mut out = vec![0u8; output_len];
-        for i in 0..output_len {
-            out[i] = base[i % 32];
-        }
-        Ok(out)
-    }
+    Ok(out)
 }
 
 // Android-compatible multi-step password derivation to match PasswordVaultActivity

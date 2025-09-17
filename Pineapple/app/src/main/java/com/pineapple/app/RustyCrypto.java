@@ -36,6 +36,7 @@ public class RustyCrypto { // Public JNI bridge class exposing native crypto met
     
     public static native int testCryptoRoundtrip();
     public static native String generatePasswordSecure(int mode, byte[] hashBytes, int length, boolean[] enabledSets, String userId);
+    public static native byte[] derivePasswordHashUnified128(byte[] appName, byte[] appPassword, byte[] masterPassword);
     public static native Object[] kyberKeypair();
     public static native Object[] x448Keypair();
     

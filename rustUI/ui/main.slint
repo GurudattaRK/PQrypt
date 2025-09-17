@@ -5,6 +5,7 @@ export global Palette {
     in-out property <brush> green: #43A047;
     in-out property <brush> blue: #1E88E5;
     in-out property <brush> light_purple: #BA68C8;
+    in-out property <brush> light_orange: #FF9800;
     in-out property <brush> white: #ffffff;
 }
 
@@ -80,9 +81,9 @@ export component MainWindow inherits Window {
                     clicked => { exit-app(); }
                 }
                 Rectangle { }
-                Button {
+                ColorButton {
                     text: "Help?";
-                    preferred-width: 80px;
+                    bg: Palette.light_orange;
                     clicked => { current-page = "help-welcome"; }
                 }
             }
@@ -152,9 +153,9 @@ export component MainWindow inherits Window {
                     }
                 }
                 Rectangle { }
-                Button {
+                ColorButton {
                     text: "Help?";
-                    preferred-width: 80px;
+                    bg: Palette.light_orange;
                     clicked => { current-page = "help-file-encryption"; }
                 }
             }
@@ -231,9 +232,9 @@ export component MainWindow inherits Window {
                     clicked => { current-page = "welcome"; }
                 }
                 Rectangle { }
-                Button {
+                ColorButton {
                     text: "Help?";
-                    preferred-width: 80px;
+                    bg: Palette.light_orange;
                     clicked => { current-page = "help-pqc-mode"; }
                 }
             }
@@ -291,9 +292,9 @@ export component MainWindow inherits Window {
                     }
                 }
                 Rectangle { }
-                Button {
+                ColorButton {
                     text: "Help?";
-                    preferred-width: 80px;
+                    bg: Palette.light_orange;
                     clicked => { current-page = "help-pqc-exchange"; }
                 }
             }
@@ -351,9 +352,9 @@ export component MainWindow inherits Window {
                     }
                 }
                 Rectangle { }
-                Button {
+                ColorButton {
                     text: "Help?";
-                    preferred-width: 80px;
+                    bg: Palette.light_orange;
                     clicked => { current-page = "help-password-generator"; }
                 }
             }
@@ -458,10 +459,10 @@ export component MainWindow inherits Window {
                     clicked => { current-page = "password-vault"; }
                 }
                 Rectangle { }
-                Button {
+                ColorButton {
                     text: "Help?";
-                    preferred-width: 80px;
-                    clicked => { /* TODO: add help page if required */ }
+                    bg: Palette.light_orange;
+                    clicked => { current-page = "help-password-settings"; }
                 }
             }
             

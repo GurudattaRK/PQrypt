@@ -260,88 +260,27 @@ class PasswordVaultActivity : AppCompatActivity() { // UI to derive, display, an
         // Run all Argon2 operations on background thread to prevent UI blocking and crashes
         passwordGenerationJob = CoroutineScope(Dispatchers.IO).launch {
             try {
-                Log.d("PasswordVault", "Starting hash flow on background thread")
-                
-                // Step 1: Hash app name
-                Log.d("PasswordVault", "Step 1: Hashing app name")
-                val appNameSalt = ByteArray(16)
-                appNameSalt[0] = 'a'.code.toByte()
-                appNameSalt[1] = 'p'.code.toByte()
-                appNameSalt[2] = 'p'.code.toByte()
-                
-                val appNameHash = RustyCrypto.argon2Hash(
+                Log.d("PasswordVault", "Starting unified 128-byte derivation on background thread")
+                val finalHash = RustyCrypto.derivePasswordHashUnified128(
                     appName.toByteArray(),
-                    appNameSalt,
-                    32
+                    appPassword.toByteArray(),
+                    masterPassword.toByteArray()
                 )
-                
-                // Check if cancelled before continuing
                 if (!isActive) return@launch
-                
-                // Step 2: Hash master password
-                Log.d("PasswordVault", "Step 2: Hashing master password")
-                val masterPasswordSalt = ByteArray(16)
-                masterPasswordSalt[0] = 'm'.code.toByte()
-                masterPasswordSalt[1] = 's'.code.toByte()
-                masterPasswordSalt[2] = 't'.code.toByte()
-                
-                val masterPasswordHash = RustyCrypto.argon2Hash(
-                    masterPassword.toByteArray(),
-                    masterPasswordSalt,
-                    32
-                )
-                
-                // Check if cancelled before continuing
-                if (!isActive) return@launch
-                
-                // Step 3: Combine hashes - hash(appNameHash + masterPasswordHash)
-                Log.d("PasswordVault", "Step 3: Combining app name and master password hashes")
-                val combinedSalt = ByteArray(16)
-                System.arraycopy(masterPasswordHash, 0, combinedSalt, 0, minOf(16, masterPasswordHash.size))
-                
-                val outputHash = RustyCrypto.argon2Hash(
-                    appNameHash,
-                    combinedSalt,
-                    64
-                )
-                
-                // Check if cancelled before continuing
-                if (!isActive) return@launch
-                
-                // Step 4: If app password exists, hash(outputHash + appPasswordHash)
-                val finalHash = if (appPassword.isNotEmpty()) {
-                    Log.d("PasswordVault", "Step 4: Adding app password hash")
-                    val appPasswordSalt = ByteArray(16)
-                    appPasswordSalt[0] = 'p'.code.toByte()
-                    appPasswordSalt[1] = 'w'.code.toByte()
-                    appPasswordSalt[2] = 'd'.code.toByte()
-                    
-                    val appPasswordHash = RustyCrypto.argon2Hash(
-                        appPassword.toByteArray(),
-                        appPasswordSalt,
-                        32
-                    )
-                    
-                    // Check if cancelled before final hash
-                    if (!isActive) return@launch
-                    
-                    val finalSalt = ByteArray(16)
-                    System.arraycopy(appPasswordHash, 0, finalSalt, 0, minOf(16, appPasswordHash.size))
-                    
-                    RustyCrypto.argon2Hash(
-                        outputHash,
-                        finalSalt,
-                        64
-                    )
-                } else {
-                    Log.d("PasswordVault", "No app password, using output hash directly")
-                    outputHash
+                if (finalHash == null || finalHash.size != 128) {
+                    Log.e("PasswordVault", "Unified 128-byte derivation failed or invalid size: ${finalHash?.size}")
+                    withContext(Dispatchers.Main) {
+                        binding.btnGeneratePassword.isEnabled = true
+                        binding.btnGeneratePassword.text = "Generate Password"
+                        Toast.makeText(this@PasswordVaultActivity, "Error: Password derivation failed", Toast.LENGTH_SHORT).show()
+                    }
+                    return@launch
                 }
 
                 // Check if cancelled before password generation
                 if (!isActive) return@launch
 
-                Log.d("PasswordVault", "Argon2 hash successful, result size: ${finalHash?.size}")
+                Log.d("PasswordVault", "Unified hash successful, result size: ${finalHash.size}")
                 
                 // Store for later use
                 finalPasswordHash = finalHash
@@ -349,7 +288,7 @@ class PasswordVaultActivity : AppCompatActivity() { // UI to derive, display, an
                 // Generate password using the final hash
                 Log.d("PasswordVault", "About to call RustyCrypto.generatePasswordSecure")
                 val generatedPassword = RustyCrypto.generatePasswordSecure(
-                    0, // BASE93 mode
+                    1, // CHARACTER SET mode so settings apply
                     finalHash,
                     passwordLength,
                     enabledSpecialSets, // Pass only the 3 special character sets

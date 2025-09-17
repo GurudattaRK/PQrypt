@@ -22,7 +22,7 @@ class PasswordSettingsActivity : AppCompatActivity() { // Configure password len
         binding = ActivityPasswordSettingsBinding.inflate(layoutInflater) // Inflate binding
         setContentView(binding.root) // Attach layout
 
-        sharedPrefs = getSharedPreferences("pineapple_vault", Context.MODE_PRIVATE) // Shared prefs namespace
+        sharedPrefs = getSharedPreferences("pqrypt_vault", Context.MODE_PRIVATE) // Shared prefs namespace
         loadSettings() // Read persisted values
         setupUI() // Wire listeners
         updateUI() // Reflect current state

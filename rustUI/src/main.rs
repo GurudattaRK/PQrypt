@@ -497,8 +497,8 @@ fn main() -> Result<(), slint::PlatformError> {
             return;
         }
         
-        // Derive password hash using Android-compatible flow
-        let first_hash = match rust_ui::rusty_api::api::derive_password_hash_android_compat(&app_name, &app_password, &master_password) {
+        // Derive password hash using unified 128-byte flow
+        let first_hash = match rust_ui::rusty_api::api::derive_password_hash_unified_128(&app_name, &app_password, &master_password) {
             Ok(hash) => hash,
             Err(_) => return,
         };
@@ -515,9 +515,8 @@ fn main() -> Result<(), slint::PlatformError> {
         enabled_symbol_sets[1] = set2_enabled;  // This maps to symbol set 5 in the API  
         enabled_symbol_sets[2] = set3_enabled;  // This maps to symbol set 6 in the API
         
-        // Generate password using BASE93 mode (mode = 0) to match Android
-        // The API enforces that first 3 sets are always enabled in charset mode; not used in BASE93
-        if let Ok(password) = rusty_api::generate_password_secure(0, &first_hash, length, &enabled_symbol_sets, "default_user") {
+        // Generate password using CHARACTER SET mode (mode = 1) so settings apply
+        if let Ok(password) = rusty_api::generate_password_secure(1, &first_hash, length, &enabled_symbol_sets, "default_user") {
             
             // Display the password in the UI only - no file storage
             ui.set_generated_password(password.into());
