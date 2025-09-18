@@ -125,7 +125,7 @@ class FileEncryptionActivity : AppCompatActivity() { // UI for selecting files a
                         pendingAction = null // Clear pending marker
                         val inputFileName = getFileNameFromUri(selectedFileUri!!) ?: "file"
                         val outputFileName = "${inputFileName}.pqrypt2"
-                        binding.tvOutputPath.text = "Encrypting to: $outputFileName" // Show actual output filename
+                        binding.tvOutputPath.text = "Encrypting...." // Show actual output filename
                         Toast.makeText(this, "Encryption started", Toast.LENGTH_SHORT).show() // Notify user
                         performEncryption() // Continue with encryption
                     }
@@ -137,7 +137,7 @@ class FileEncryptionActivity : AppCompatActivity() { // UI for selecting files a
                         } else {
                             "${inputFileName}.decrypted"
                         }
-                        binding.tvOutputPath.text = "Decrypting to: $outputFileName" // Show actual output filename
+                        binding.tvOutputPath.text = "Decrypting...." // Show actual output filename
                         Toast.makeText(this, "Decryption started", Toast.LENGTH_SHORT).show() // Notify user
                         performDecryption() // Continue with decryption
                     }
@@ -161,9 +161,9 @@ class FileEncryptionActivity : AppCompatActivity() { // UI for selecting files a
                     val timingInfo = pendingSuccessToast?.substringBefore(" (") ?: ""
                     val timingPart = if (timingInfo.contains("in ")) timingInfo.substringAfter("in ") else ""
                     binding.tvOutputPath.text = if (timingPart.isNotEmpty()) {
-                        "⏱️ $timingPart - Saved to: $outUri"
+                        "⏱️ $timingPart - Saved to: ${getFullPath(outUri)}"
                     } else {
-                        "Saved to: $outUri"
+                        "Saved to: ${getFullPath(outUri)}"
                     }
                     Toast.makeText(this, pendingSuccessToast ?: "Saved", Toast.LENGTH_SHORT).show()
                 } catch (e: Exception) {
@@ -278,7 +278,7 @@ class FileEncryptionActivity : AppCompatActivity() { // UI for selecting files a
                             } else {
                                 val inputFileName = getFileNameFromUri(selectedFileUri!!) ?: "file"
                                 val outputFileName = "${inputFileName}.pqrypt2"
-                                binding.tvOutputPath.text = "Encrypting to: $outputFileName" // Show actual output filename
+                                binding.tvOutputPath.text = "Started processing your file, please wait...." // Show processing status
                                 Toast.makeText(this@FileEncryptionActivity, "Encryption started", Toast.LENGTH_SHORT).show() // UX feedback
                                 performEncryption() // Begin encryption workflow
                             }
@@ -295,7 +295,7 @@ class FileEncryptionActivity : AppCompatActivity() { // UI for selecting files a
                     } else {
                         val inputFileName = getFileNameFromUri(selectedFileUri!!) ?: "file"
                         val outputFileName = "${inputFileName}.pqrypt2"
-                        binding.tvOutputPath.text = "Encrypting to: $outputFileName"
+                        binding.tvOutputPath.text = "Started processing your file, please wait...."
                         Toast.makeText(this, "Encryption started", Toast.LENGTH_SHORT).show()
                         performEncryption()
                     }
@@ -335,7 +335,7 @@ class FileEncryptionActivity : AppCompatActivity() { // UI for selecting files a
                                 } else {
                                     "${inputFileName}.decrypted"
                                 }
-                                binding.tvOutputPath.text = "Decrypting to: $outputFileName" // Show actual output filename
+                                binding.tvOutputPath.text = "Started processing your file, please wait...." // Show processing status
                                 Toast.makeText(this@FileEncryptionActivity, "Decryption started", Toast.LENGTH_SHORT).show() // UX feedback
                                 performDecryption() // Begin decryption workflow
                             }
@@ -578,10 +578,9 @@ class FileEncryptionActivity : AppCompatActivity() { // UI for selecting files a
                 try {
                     val startTime = System.currentTimeMillis()
                     
-                    // Update UI to show processing with output path
+                    // Update UI to show processing status
                     withContext(Dispatchers.Main) {
-                        val outputPath = getFileNameFromUri(outputUri) ?: suggestedName
-                        binding.tvOutputPath.text = "Encrypting to: $outputPath"
+                        binding.tvOutputPath.text = "Started processing your file, please wait...."
                     }
                     
                     // Debug logging
@@ -600,7 +599,7 @@ class FileEncryptionActivity : AppCompatActivity() { // UI for selecting files a
                     val elapsedSeconds = elapsedTime / 1000.0
                     
                     withContext(Dispatchers.Main) {
-                        val outputPath = getFileNameFromUri(outputUri) ?: suggestedName
+                        val outputPath = getFullPath(outputUri)
                         binding.tvOutputPath.text = "✅ Encrypted to: $outputPath (${String.format("%.1f", elapsedSeconds)}s)"
                         Toast.makeText(this@FileEncryptionActivity, "File encrypted in ${String.format("%.1f", elapsedSeconds)}s", Toast.LENGTH_SHORT).show()
                         clearPendingState()
@@ -638,10 +637,9 @@ class FileEncryptionActivity : AppCompatActivity() { // UI for selecting files a
                 try {
                     val startTime = System.currentTimeMillis()
                     
-                    // Update UI to show processing with output path
+                    // Update UI to show processing status
                     withContext(Dispatchers.Main) {
-                        val outputPath = getFileNameFromUri(outputUri) ?: suggestedName
-                        binding.tvOutputPath.text = "Decrypting to: $outputPath"
+                        binding.tvOutputPath.text = "Started processing your file, please wait...."
                     }
                     
                     // Call streaming decryption
@@ -660,7 +658,7 @@ class FileEncryptionActivity : AppCompatActivity() { // UI for selecting files a
                     val elapsedSeconds = elapsedTime / 1000.0
                     
                     withContext(Dispatchers.Main) {
-                        val outputPath = getFileNameFromUri(outputUri) ?: suggestedName
+                        val outputPath = getFullPath(outputUri)
                         binding.tvOutputPath.text = "✅ Decrypted to: $outputPath (${String.format("%.1f", elapsedSeconds)}s)"
                         Toast.makeText(this@FileEncryptionActivity, "File decrypted in ${String.format("%.1f", elapsedSeconds)}s", Toast.LENGTH_SHORT).show()
                         clearPendingState()
@@ -694,15 +692,68 @@ class FileEncryptionActivity : AppCompatActivity() { // UI for selecting files a
                 folderUri,
                 DocumentsContract.getTreeDocumentId(folderUri)
             )
-            DocumentsContract.createDocument(
-                contentResolver,
-                docUri,
-                "application/octet-stream",
-                fileName
-            )
+            
+            // Generate unique filename by appending _copy if needed
+            var uniqueFileName = fileName
+            var copyCount = 0
+            
+            while (copyCount <= 100) {
+                try {
+                    // Try to create document with current filename
+                    val resultUri = DocumentsContract.createDocument(
+                        contentResolver,
+                        docUri,
+                        "application/octet-stream",
+                        uniqueFileName
+                    )
+                    
+                    if (resultUri != null) {
+                        android.util.Log.d("FileEncryption", "Created file with unique name: $uniqueFileName")
+                        return resultUri
+                    }
+                    
+                    // If creation failed, try with _copy suffix
+                    copyCount++
+                    uniqueFileName = generateCopyFileName(fileName, copyCount)
+                    
+                } catch (e: Exception) {
+                    // If file exists or creation failed, try with _copy suffix
+                    copyCount++
+                    uniqueFileName = generateCopyFileName(fileName, copyCount)
+                }
+            }
+            
+            // If we exhausted all attempts
+            android.util.Log.e("FileEncryption", "Unable to create unique filename after 100 attempts")
+            null
+            
         } catch (e: Exception) {
             android.util.Log.e("FileEncryption", "Failed to create file in folder: ${e.message}", e)
             null
+        }
+    }
+    
+    private fun generateCopyFileName(originalName: String, copyCount: Int): String {
+        // Split filename and extension
+        val lastDotIndex = originalName.lastIndexOf('.')
+        return if (lastDotIndex != -1) {
+            val nameWithoutExt = originalName.substring(0, lastDotIndex)
+            val extension = originalName.substring(lastDotIndex)
+            
+            if (copyCount == 1) {
+                "${nameWithoutExt}_copy$extension"
+            } else {
+                // For multiple copies, keep appending _copy
+                "${nameWithoutExt}" + "_copy".repeat(copyCount) + "$extension"
+            }
+        } else {
+            // No extension
+            if (copyCount == 1) {
+                "${originalName}_copy"
+            } else {
+                // For multiple copies, keep appending _copy
+                "${originalName}" + "_copy".repeat(copyCount)
+            }
         }
     }
 
@@ -748,9 +799,9 @@ class FileEncryptionActivity : AppCompatActivity() { // UI for selecting files a
                 val timingInfo = pendingSuccessToast?.substringBefore(" (") ?: ""
                 val timingPart = if (timingInfo.contains("in ")) timingInfo.substringAfter("in ") else ""
                 binding.tvOutputPath.text = if (timingPart.isNotEmpty()) {
-                    "⏱️ $timingPart - Saved to: $outUri"
+                    "⏱️ $timingPart - Saved to: ${getFullPath(outUri)}"
                 } else {
-                    "Saved to: $outUri"
+                    "Saved to: ${getFullPath(outUri)}"
                 } // Update UI with timing and target
                 Toast.makeText(this, pendingSuccessToast ?: "Saved", Toast.LENGTH_SHORT).show() // Notify success
             } else {

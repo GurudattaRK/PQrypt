@@ -13,11 +13,13 @@ use argon2::{Argon2, Algorithm, Version, Params};
 use zeroize::Zeroize;
 
 
-// Cached keys structure for performance
+// Cached keys structure for performance with CBC IVs
 struct TripleCipherKeys {
     aes_key: [u8; 32],
     serpent_key: [u8; 32],
     tf_key_128: [u8; 128],
+    serpent_iv: [u8; 16],      // CBC IV for Serpent
+    threefish_iv: [u8; 128],   // CBC IV for Threefish
 }
 
 // Unified 128-byte password derivation: each step outputs 128 bytes
@@ -31,23 +33,28 @@ pub fn derive_password_hash_unified_128(
     let mut mst_salt = [0u8; 32]; mst_salt[0] = b'm'; mst_salt[1] = b's'; mst_salt[2] = b't';
     let mut pwd_salt = [0u8; 32]; pwd_salt[0] = b'p'; pwd_salt[1] = b'w'; pwd_salt[2] = b'd';
 
+    // Argon2 parameters for PASSWORD GENERATOR (mem=16 MiB, time=3, lanes=1) - MATCH ANDROID
+    let mem_kib: u32 = 16 * 1024;  // 16 MB to match Android
+    let time_cost: u32 = 3;        // 3 iterations to match Android
+    let lanes: u32 = 1;            // 1 lane
+
     // Step 1: 128-byte hash of app_name
-    let app_name_hash = argon2id_hash(app_name.as_bytes(), &app_salt, 128, 10240, 2, 1)?;
+    let app_name_hash = argon2id_hash(app_name.as_bytes(), &app_salt, 128, mem_kib, time_cost, lanes)?;
 
     // Step 2: 128-byte hash of master_password
-    let master_hash = argon2id_hash(master_password.as_bytes(), &mst_salt, 128, 10240, 2, 1)?;
+    let master_hash = argon2id_hash(master_password.as_bytes(), &mst_salt, 128, mem_kib, time_cost, lanes)?;
 
     // Step 3: rehash app_name_hash with first 16 bytes of master_hash as salt -> 128 bytes
     let mut combined_salt = [0u8; 32];
     combined_salt[..16].copy_from_slice(&master_hash[..16]);
-    let mut out_hash = argon2id_hash(&app_name_hash, &combined_salt, 128, 10240, 2, 1)?;
+    let mut out_hash = argon2id_hash(&app_name_hash, &combined_salt, 128, mem_kib, time_cost, lanes)?;
 
     // Step 4: If app_password present, rehash with first 16 bytes of its 128-byte hash as salt
     if !app_password.is_empty() {
-        let pwd_hash = argon2id_hash(app_password.as_bytes(), &pwd_salt, 128, 10240, 2, 1)?;
+        let pwd_hash = argon2id_hash(app_password.as_bytes(), &pwd_salt, 128, mem_kib, time_cost, lanes)?;
         let mut final_salt = [0u8; 32];
         final_salt[..16].copy_from_slice(&pwd_hash[..16]);
-        out_hash = argon2id_hash(&out_hash, &final_salt, 128, 10240, 2, 1)?;
+        out_hash = argon2id_hash(&out_hash, &final_salt, 128, mem_kib, time_cost, lanes)?;
     }
 
     Ok(out_hash)
@@ -56,14 +63,14 @@ pub fn derive_password_hash_unified_128(
 impl TripleCipherKeys {
     #[inline]
     fn derive_from_master(master_key: &[u8; 128]) -> Result<Self, CryptoError> {
-        // Single Argon2 derivation to 192 bytes (128 + 32 + 32) so each cipher has its own key
+        // Updated to derive 336 bytes for keys + CBC IVs (192 + 16 + 128)
         const SALT_COMBINED: [u8; 32] = [
-            b'P', b'Q', b'r', b'y', b'p', b't', b':', b'T', b'F', b'S', b'-', b'K', b'D', b':', b'1', b'.', b'0',
+            b'P', b'Q', b'r', b'y', b'p', b't', b':', b'T', b'F', b'S', b'-', b'K', b'D', b':', b'2', b'.', b'0',
             0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
         ];
 
-        let mut derived = argon2id_hash(master_key, &SALT_COMBINED, 192, 10240, 1, 1)?;
-        if derived.len() != 192 { return Err(CryptoError::KeyDerivationFailed); }
+        let mut derived = argon2id_hash(master_key, &SALT_COMBINED, 336, 10240, 1, 1)?;
+        if derived.len() != 336 { return Err(CryptoError::KeyDerivationFailed); }
 
         let mut tf_key_128 = [0u8; 128];
         tf_key_128.copy_from_slice(&derived[0..128]);
@@ -71,32 +78,49 @@ impl TripleCipherKeys {
         serpent_key.copy_from_slice(&derived[128..160]);
         let mut aes_key = [0u8; 32];
         aes_key.copy_from_slice(&derived[160..192]);
+        let mut serpent_iv = [0u8; 16];
+        serpent_iv.copy_from_slice(&derived[192..208]);
+        let mut threefish_iv = [0u8; 128];
+        threefish_iv.copy_from_slice(&derived[208..336]);
 
         // Zeroize derived material before returning keys
         derived.zeroize();
-        Ok(TripleCipherKeys { aes_key, serpent_key, tf_key_128 })
+        Ok(TripleCipherKeys { aes_key, serpent_key, tf_key_128, serpent_iv, threefish_iv })
     }
 }
 
 
-// Optimized in-place chunk processing
+// CBC mode encryption with chaining state
 #[inline(always)]
-fn triple_encrypt_chunk_inplace(chunk: &mut [u8; CHUNK_SIZE], keys: &TripleCipherKeys) -> Result<(), CryptoError> {
-    // Threefish-1024 encryption (in-place)
+fn triple_encrypt_chunk_inplace(
+    chunk: &mut [u8; CHUNK_SIZE], 
+    keys: &TripleCipherKeys,
+    threefish_chain: &mut [u8; 128],
+    serpent_chain: &mut [u8; 16]
+) -> Result<(), CryptoError> {
+    // Threefish-1024 CBC encryption (in-place)
+    // XOR with previous ciphertext (chain)
+    for i in 0..128 {
+        chunk[i] ^= threefish_chain[i];
+    }
+    
     let cipher = Threefish1024::new(&keys.tf_key_128.into());
     let block_ga: &mut GenericArray<u8, U128> = GenericArray::from_mut_slice(chunk);
     cipher.encrypt_block(block_ga);
     
-    // Serpent encryption - batched 8-block processing
-    serpent_encrypt_8blocks(chunk, &keys.serpent_key)?;
+    // Update Threefish chain with new ciphertext
+    threefish_chain.copy_from_slice(chunk);
+    
+    // Serpent CBC encryption - process 8 blocks with chaining
+    serpent_encrypt_8blocks_cbc(chunk, &keys.serpent_key, serpent_chain)?;
     
     Ok(())
 }
 
 
-// Ultra-optimized Serpent processing using single cipher instance
+// CBC mode Serpent processing with chaining
 #[inline(always)]
-fn serpent_encrypt_8blocks(data: &mut [u8; CHUNK_SIZE], key: &[u8; 32]) -> Result<(), CryptoError> {
+fn serpent_encrypt_8blocks_cbc(data: &mut [u8; CHUNK_SIZE], key: &[u8; 32], chain: &mut [u8; 16]) -> Result<(), CryptoError> {
     use serpent::{Serpent, cipher::KeyInit};
     
     let cipher = Serpent::new_from_slice(key)
@@ -106,34 +130,72 @@ fn serpent_encrypt_8blocks(data: &mut [u8; CHUNK_SIZE], key: &[u8; 32]) -> Resul
         let block_start = i * 16;
         let block_end = block_start + 16;
         
-        // Direct in-place operation with zero-copy
+        // Get current block
         let block_slice = &mut data[block_start..block_end];
         let block_array: &mut [u8; 16] = block_slice.try_into()
             .map_err(|_| CryptoError::InvalidInput)?;
+        
+        // CBC: XOR with previous ciphertext (chain)
+        for j in 0..16 {
+            block_array[j] ^= chain[j];
+        }
+        
+        // Encrypt block
         serpent_encrypt_inplace(&cipher, block_array);
+        
+        // Update chain with new ciphertext
+        chain.copy_from_slice(block_array);
     }
     Ok(())
 }
 
 
-// Optimized in-place chunk decryption
+// CBC mode decryption with chaining state
 #[inline(always)]
-fn triple_decrypt_chunk_inplace(chunk: &mut [u8; CHUNK_SIZE], keys: &TripleCipherKeys) -> Result<(), CryptoError> {
-    // Serpent decryption - batched 8-block processing
-    serpent_decrypt_8blocks(chunk, &keys.serpent_key)?;
+fn triple_decrypt_chunk_inplace(
+    chunk: &mut [u8; CHUNK_SIZE], 
+    keys: &TripleCipherKeys,
+    threefish_chain: &mut [u8; 128],
+    serpent_chain: &mut [u8; 16]
+) -> Result<(), CryptoError> {
+    // Save current ciphertext for Serpent chain update
+    let mut serpent_prev_blocks = [[0u8; 16]; 8];
+    for i in 0..8 {
+        let block_start = i * 16;
+        serpent_prev_blocks[i].copy_from_slice(&chunk[block_start..block_start + 16]);
+    }
+    
+    // Serpent CBC decryption - process 8 blocks with chaining
+    serpent_decrypt_8blocks_cbc(chunk, &keys.serpent_key, serpent_chain, &serpent_prev_blocks)?;
+    
+    // Save current Threefish ciphertext for chain update
+    let threefish_prev = *chunk;
     
     // Threefish-1024 decryption (in-place)
     let cipher = Threefish1024::new(&keys.tf_key_128.into());
     let block_ga: &mut GenericArray<u8, U128> = GenericArray::from_mut_slice(chunk);
     cipher.decrypt_block(block_ga);
     
+    // CBC: XOR with previous ciphertext (chain)
+    for i in 0..128 {
+        chunk[i] ^= threefish_chain[i];
+    }
+    
+    // Update Threefish chain with current ciphertext
+    threefish_chain.copy_from_slice(&threefish_prev);
+    
     Ok(())
 }
 
 
-// Ultra-optimized Serpent decryption using single cipher instance
+// CBC mode Serpent decryption with chaining
 #[inline(always)]
-fn serpent_decrypt_8blocks(data: &mut [u8; CHUNK_SIZE], key: &[u8; 32]) -> Result<(), CryptoError> {
+fn serpent_decrypt_8blocks_cbc(
+    data: &mut [u8; CHUNK_SIZE], 
+    key: &[u8; 32], 
+    chain: &mut [u8; 16],
+    prev_blocks: &[[u8; 16]; 8]
+) -> Result<(), CryptoError> {
     use serpent::{Serpent, cipher::KeyInit};
     
     let cipher = Serpent::new_from_slice(key)
@@ -143,11 +205,21 @@ fn serpent_decrypt_8blocks(data: &mut [u8; CHUNK_SIZE], key: &[u8; 32]) -> Resul
         let block_start = i * 16;
         let block_end = block_start + 16;
         
-        // Direct in-place operation with zero-copy
+        // Get current block
         let block_slice = &mut data[block_start..block_end];
         let block_array: &mut [u8; 16] = block_slice.try_into()
             .map_err(|_| CryptoError::InvalidInput)?;
+        
+        // Decrypt block
         serpent_decrypt_inplace(&cipher, block_array);
+        
+        // CBC: XOR with previous ciphertext (chain)
+        for j in 0..16 {
+            block_array[j] ^= chain[j];
+        }
+        
+        // Update chain with the previous ciphertext block
+        chain.copy_from_slice(&prev_blocks[i]);
     }
     Ok(())
 }
@@ -166,18 +238,17 @@ pub fn triple_encrypt(master_key: &[u8; 128], plaintext: &[u8]) -> Result<Vec<u8
     processed.extend_from_slice(plaintext);
     processed.resize(padded_len, 0); // Pad with zeros
     
-    // Process in-place by chunks for maximum memory efficiency
-    let tf_cipher = Threefish1024::new(&keys.tf_key_128.into());
+    // Initialize CBC chaining state with IVs
+    let mut threefish_chain = keys.threefish_iv;
+    let mut serpent_chain = keys.serpent_iv;
+    
+    // Process in-place by chunks with CBC mode
     for chunk in processed.chunks_mut(CHUNK_SIZE) {
         let chunk_array: &mut [u8; CHUNK_SIZE] = chunk.try_into()
             .map_err(|_| CryptoError::InvalidInput)?;
         
-        // Threefish-1024 encryption (in-place)
-        let block_ga: &mut GenericArray<u8, U128> = GenericArray::from_mut_slice(chunk_array);
-        tf_cipher.encrypt_block(block_ga);
-        
-        // Serpent encryption - batched 8-block processing
-        serpent_encrypt_8blocks(chunk_array, &keys.serpent_key)?;
+        // Use CBC mode encryption with chaining state
+        triple_encrypt_chunk_inplace(chunk_array, &keys, &mut threefish_chain, &mut serpent_chain)?;
     }
     
     // AES-GCM encryption
@@ -195,11 +266,13 @@ pub fn triple_encrypt(master_key: &[u8; 128], plaintext: &[u8]) -> Result<Vec<u8
     result.extend_from_slice(&iv);
     result.extend_from_slice(&ciphertext);
 
-    // Zeroize sensitive buffers
+    // Zeroize sensitive buffers including CBC IVs
     processed.zeroize();
     iv.zeroize();
     keys.aes_key.zeroize();
     keys.serpent_key.zeroize();
+    keys.serpent_iv.zeroize();
+    keys.threefish_iv.zeroize();
     keys.tf_key_128.zeroize();
     
     Ok(result)
@@ -233,29 +306,30 @@ pub fn triple_decrypt(master_key: &[u8; 128], input: &[u8]) -> Result<Vec<u8>, C
         return Err(CryptoError::InvalidInput);
     }
     
-    // Block-by-block in-place processing
-    let tf_cipher = Threefish1024::new(&keys.tf_key_128.into());
+    // Initialize CBC chaining state with IVs
+    let mut threefish_chain = keys.threefish_iv;
+    let mut serpent_chain = keys.serpent_iv;
+    
+    // Block-by-block in-place processing with CBC mode
     for chunk in processed.chunks_mut(CHUNK_SIZE) {
         let chunk_array: &mut [u8; CHUNK_SIZE] = chunk.try_into()
             .map_err(|_| CryptoError::InvalidInput)?;
         
-        // Serpent decryption - batched 8-block processing
-        serpent_decrypt_8blocks(chunk_array, &keys.serpent_key)?;
-        
-        // Threefish-1024 decryption (in-place)
-        let block_ga: &mut GenericArray<u8, U128> = GenericArray::from_mut_slice(chunk_array);
-        tf_cipher.decrypt_block(block_ga);
+        // Use CBC mode decryption with chaining state
+        triple_decrypt_chunk_inplace(chunk_array, &keys, &mut threefish_chain, &mut serpent_chain)?;
     }
     
-    // Zeroize keys before returning plaintext
+    // Zeroize keys and CBC IVs before returning plaintext
     keys.aes_key.zeroize();
     keys.serpent_key.zeroize();
     keys.tf_key_128.zeroize();
+    keys.serpent_iv.zeroize();
+    keys.threefish_iv.zeroize();
     
     Ok(processed)
 }
 
-// Password generation matching the old working implementation
+// Password generation matching the Android implementation exactly
 pub fn generate_password(
     mode: u8,
     hash_bytes: &[u8],
@@ -364,8 +438,8 @@ pub fn generate_password_secure(
 }
 
 // Android-compatible Argon2id hashing (matches JNI c_ffi argon2_hash_c)
-// - memory = 512KB, iterations = 2, lanes = 1
-// - base output = 32 bytes, then repeat to fill requested output_len
+// - memory = 16MB, iterations = 3, lanes = 1 - MATCH ANDROID EXACTLY
+// - variable output length as requested
 // - salt uses ONLY the first 16 bytes (remaining ignored), zeros if empty
 pub fn argon2_hash_mobile_compat(
     password: &[u8],
@@ -374,14 +448,14 @@ pub fn argon2_hash_mobile_compat(
 ) -> Result<Vec<u8>, CryptoError> {
     if output_len == 0 || output_len > 1024 { return Err(CryptoError::InvalidParameters); }
 
-    // Prepare 16-byte salt from provided bytes (pad/truncate)
+    // Prepare 32-byte salt from provided bytes (pad/truncate)
     let mut salt_buf = [0u8; 32];
     let copy_len = salt.len().min(32);
     salt_buf[..copy_len].copy_from_slice(&salt[..copy_len]);
-    let salt16 = &salt_buf[..16];
+    let salt16 = &salt_buf[..16];  // Use first 16 bytes for Argon2
 
-    // Fixed 32-byte Argon2id output with updated memory cost (10MB)
-    let params = Params::new(10240, 2, 1, Some(output_len)).map_err(|_| CryptoError::InvalidParameters)?;
+    // MATCH ANDROID: 16MB memory, 3 iterations, 1 thread, caller-specified output length
+    let params = Params::new(16384, 3, 1, Some(output_len)).map_err(|_| CryptoError::InvalidParameters)?;
     let argon2 = Argon2::new(Algorithm::Argon2id, Version::V0x13, params);
     let mut out = vec![0u8; output_len];
     argon2
@@ -397,29 +471,29 @@ pub fn derive_password_hash_android_compat(
     app_password: &str,
     master_password: &str,
 ) -> Result<Vec<u8>, CryptoError> {
-    // Step 1: Hash app name with salt "app" (16 bytes, ascii 'a','p','p') -> 32 bytes
-    let mut app_salt = [0u8; 16];
+    // Step 1: Hash app name with salt "app" (32 bytes, ascii 'a','p','p') -> 128 bytes
+    let mut app_salt = [0u8; 32];
     app_salt[0] = b'a'; app_salt[1] = b'p'; app_salt[2] = b'p';
-    let app_name_hash = argon2_hash_mobile_compat(app_name.as_bytes(), &app_salt, 32)?;
+    let app_name_hash = argon2_hash_mobile_compat(app_name.as_bytes(), &app_salt, 128)?;
 
-    // Step 2: Hash master password with salt "mst" -> 32 bytes
-    let mut master_salt = [0u8; 16];
+    // Step 2: Hash master password with salt "mst" -> 128 bytes
+    let mut master_salt = [0u8; 32];
     master_salt[0] = b'm'; master_salt[1] = b's'; master_salt[2] = b't';
-    let master_hash = argon2_hash_mobile_compat(master_password.as_bytes(), &master_salt, 32)?;
+    let master_hash = argon2_hash_mobile_compat(master_password.as_bytes(), &master_salt, 128)?;
 
-    // Step 3: Hash(app_name_hash) with salt = first 16 bytes of master_hash -> 64 bytes
-    let mut combined_salt = [0u8; 16];
-    combined_salt.copy_from_slice(&master_hash[..16]);
-    let mut out_hash = argon2_hash_mobile_compat(&app_name_hash, &combined_salt, 64)?;
+    // Step 3: Hash(app_name_hash) with salt = first 16 bytes of master_hash -> 128 bytes
+    let mut combined_salt = [0u8; 32];
+    combined_salt[..16].copy_from_slice(&master_hash[..16]);
+    let mut out_hash = argon2_hash_mobile_compat(&app_name_hash, &combined_salt, 128)?;
 
     // Step 4: If app_password present, rehash with app_password salt "pwd"
     if !app_password.is_empty() {
-        let mut pwd_salt = [0u8; 16];
+        let mut pwd_salt = [0u8; 32];
         pwd_salt[0] = b'p'; pwd_salt[1] = b'w'; pwd_salt[2] = b'd';
-        let pwd_hash = argon2_hash_mobile_compat(app_password.as_bytes(), &pwd_salt, 32)?;
-        let mut final_salt = [0u8; 16];
-        final_salt.copy_from_slice(&pwd_hash[..16]);
-        out_hash = argon2_hash_mobile_compat(&out_hash, &final_salt, 64)?;
+        let pwd_hash = argon2_hash_mobile_compat(app_password.as_bytes(), &pwd_salt, 128)?;
+        let mut final_salt = [0u8; 32];
+        final_salt[..16].copy_from_slice(&pwd_hash[..16]);
+        out_hash = argon2_hash_mobile_compat(&out_hash, &final_salt, 128)?;
     }
 
     Ok(out_hash)

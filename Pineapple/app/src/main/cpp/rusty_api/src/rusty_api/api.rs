@@ -67,8 +67,9 @@ fn derive_file_keys_from_secret(
     time_cost: u32,
     lanes: u32,
 ) -> Result<TripleCipherKeys, CryptoError> {
-    let mut derived = super::symmetric::argon2id_hash(secret, salt, 192, mem_kib, time_cost, lanes)?;
-    if derived.len() != 192 { return Err(CryptoError::KeyDerivationFailed); }
+    // Updated to derive 336 bytes for keys + CBC IVs
+    let mut derived = super::symmetric::argon2id_hash(secret, salt, 336, mem_kib, time_cost, lanes)?;
+    if derived.len() != 336 { return Err(CryptoError::KeyDerivationFailed); }
 
     let mut tf_key_128 = [0u8; 128];
     tf_key_128.copy_from_slice(&derived[0..128]);
@@ -76,9 +77,13 @@ fn derive_file_keys_from_secret(
     serpent_key.copy_from_slice(&derived[128..160]);
     let mut aes_key = [0u8; 32];
     aes_key.copy_from_slice(&derived[160..192]);
+    let mut serpent_iv = [0u8; 16];
+    serpent_iv.copy_from_slice(&derived[192..208]);
+    let mut threefish_iv = [0u8; 128];
+    threefish_iv.copy_from_slice(&derived[208..336]);
 
     derived.zeroize();
-    Ok(TripleCipherKeys { aes_key, serpent_key, tf_key_128 })
+    Ok(TripleCipherKeys { aes_key, serpent_key, tf_key_128, serpent_iv, threefish_iv })
 }
 
 #[inline]
@@ -177,11 +182,15 @@ pub fn triple_encrypt_fd(
     let mut ghash = GHash::new(ghash::Key::from_slice(&h));
     ghash.update_padded(&header); // header as AAD
 
-    // Streaming buffers
+    // Streaming buffers and CBC state
     let mut io_buf = [0u8; IO_BUF_SIZE];
     let mut carry128 = Vec::with_capacity(128); // carry for <128B residual between reads
     let mut total_plain_len: u64 = 0;
     let mut total_ct_len: usize = 0;
+    
+    // Initialize CBC state with IVs for streaming encryption
+    let mut threefish_prev = keys.threefish_iv;
+    let mut serpent_prev = keys.serpent_iv;
 
     loop {
         let read_len = in_file.read(&mut io_buf).map_err(|_| CryptoError::InvalidInput)?;
@@ -196,11 +205,11 @@ pub fn triple_encrypt_fd(
         let process_len = (work.len() / CHUNK_SIZE) * CHUNK_SIZE; // multiple of 128
         let (process_slice, remainder) = work.split_at(process_len);
 
-        // Triple encrypt in-place per 128B block
+        // Triple encrypt in-place per 128B block with CBC state
         let mut process_vec = process_slice.to_vec();
         for chunk in process_vec.chunks_mut(CHUNK_SIZE) {
             let chunk_array: &mut [u8; CHUNK_SIZE] = chunk.try_into().map_err(|_| CryptoError::InvalidInput)?;
-            triple_encrypt_chunk_inplace(chunk_array, &keys)?;
+            triple_encrypt_chunk_inplace_cbc(chunk_array, &keys, &mut threefish_prev, &mut serpent_prev)?;
         }
 
         // AES-CTR encrypt in-place
@@ -218,12 +227,12 @@ pub fn triple_encrypt_fd(
         carry128.extend_from_slice(remainder);
     }
 
-    // Handle final residual: pad to 128B if needed and process
+    // Handle final residual: pad to 128B if needed and process with CBC state
     if !carry128.is_empty() {
         let mut last_block = [0u8; CHUNK_SIZE];
         last_block[..carry128.len()].copy_from_slice(&carry128);
-        // Triple encrypt
-        triple_encrypt_chunk_inplace(&mut last_block, &keys)?;
+        // Triple encrypt with maintained CBC state
+        triple_encrypt_chunk_inplace_cbc(&mut last_block, &keys, &mut threefish_prev, &mut serpent_prev)?;
         // AES-CTR
         let mut last_vec = last_block.to_vec();
         ctr.apply_keystream(&mut last_vec);
@@ -253,6 +262,8 @@ pub fn triple_encrypt_fd(
     keys.aes_key.zeroize();
     keys.serpent_key.zeroize();
     keys.tf_key_128.zeroize();
+    keys.serpent_iv.zeroize();
+    keys.threefish_iv.zeroize();
     salt.zeroize();
     iv.zeroize();
     io_buf.zeroize();
@@ -294,6 +305,10 @@ pub fn triple_decrypt_fd(
     let mut ring = Vec::with_capacity(IO_BUF_SIZE + 24);
     let mut total_ct_len: usize = 0; // ciphertext length excluding trailer+tag
     let mut all_plaintext = Vec::new(); // collect all plaintext for final trimming
+    
+    // Initialize CBC state with IVs for streaming decryption
+    let mut threefish_prev = keys.threefish_iv;
+    let mut serpent_prev = keys.serpent_iv;
 
     loop {
         let read_len = in_file.read(&mut io_buf).map_err(|_| CryptoError::InvalidInput)?;
@@ -381,6 +396,8 @@ pub fn triple_decrypt_fd(
     keys.aes_key.zeroize();
     keys.serpent_key.zeroize();
     keys.tf_key_128.zeroize();
+    keys.serpent_iv.zeroize();
+    keys.threefish_iv.zeroize();
     salt.zeroize();
     iv.zeroize();
     io_buf.zeroize();
@@ -388,11 +405,13 @@ pub fn triple_decrypt_fd(
     Ok(())
 }
 
-// Cached keys structure for performance
+// Cached keys structure for performance with CBC IVs
 struct TripleCipherKeys {
     aes_key: [u8; 32],
     serpent_key: [u8; 32],
     tf_key_128: [u8; 128],
+    serpent_iv: [u8; 16],    // IV for Serpent CBC
+    threefish_iv: [u8; 128], // IV for Threefish CBC
 }
 
 impl Zeroize for TripleCipherKeys {
@@ -400,20 +419,22 @@ impl Zeroize for TripleCipherKeys {
         self.aes_key.zeroize();
         self.serpent_key.zeroize();
         self.tf_key_128.zeroize();
+        self.serpent_iv.zeroize();
+        self.threefish_iv.zeroize();
     }
 }
 
 impl TripleCipherKeys {
     #[inline]
     fn derive_from_master(master_key: &[u8; 128]) -> Result<Self, CryptoError> {
-        // Single Argon2 derivation to 192 bytes (128 + 32 + 32) so each cipher has its own key
+        // Argon2 derivation to 336 bytes (128 + 32 + 32 + 16 + 128) for keys + IVs
         const SALT_COMBINED: [u8; 32] = [
-            b'P', b'Q', b'r', b'y', b'p', b't', b':', b'T', b'F', b'S', b'-', b'K', b'D', b':', b'1', b'.', b'0',
+            b'P', b'Q', b'r', b'y', b'p', b't', b':', b'T', b'F', b'S', b'-', b'K', b'D', b':', b'2', b'.', b'0',
             0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
         ];
 
-        let mut derived = argon2id_hash(master_key, &SALT_COMBINED, 192, 10240, 1, 1)?;
-        if derived.len() != 192 { return Err(CryptoError::KeyDerivationFailed); }
+        let mut derived = argon2id_hash(master_key, &SALT_COMBINED, 336, 10240, 1, 1)?;
+        if derived.len() != 336 { return Err(CryptoError::KeyDerivationFailed); }
 
         let mut tf_key_128 = [0u8; 128];
         tf_key_128.copy_from_slice(&derived[0..128]);
@@ -421,37 +442,84 @@ impl TripleCipherKeys {
         serpent_key.copy_from_slice(&derived[128..160]);
         let mut aes_key = [0u8; 32];
         aes_key.copy_from_slice(&derived[160..192]);
+        let mut serpent_iv = [0u8; 16];
+        serpent_iv.copy_from_slice(&derived[192..208]);
+        let mut threefish_iv = [0u8; 128];
+        threefish_iv.copy_from_slice(&derived[208..336]);
 
         // Zeroize derived material before returning keys
         derived.zeroize();
-        Ok(TripleCipherKeys { aes_key, serpent_key, tf_key_128 })
+        Ok(TripleCipherKeys { aes_key, serpent_key, tf_key_128, serpent_iv, threefish_iv })
     }
 }
 
-// Optimized in-place chunk processing
+// CBC mode encryption for triple cipher (128-byte chunks)
 #[inline(always)]
-fn triple_encrypt_chunk_inplace(chunk: &mut [u8; CHUNK_SIZE], keys: &TripleCipherKeys) -> Result<(), CryptoError> {
+fn triple_encrypt_chunk_inplace_cbc(chunk: &mut [u8; CHUNK_SIZE], keys: &TripleCipherKeys, threefish_prev: &mut [u8; 128], serpent_prev: &mut [u8; 16]) -> Result<(), CryptoError> {
     use log::debug;
     
     // Log first 16 bytes before encryption
-    debug!("ENCRYPT: Before Threefish: {:02x?}", &chunk[..16]);
+    debug!("ENCRYPT: Before Threefish CBC: {:02x?}", &chunk[..16]);
     
-    // Threefish-1024 encryption (in-place)
+    // Threefish-1024 CBC: XOR with previous block, then encrypt
+    for i in 0..CHUNK_SIZE {
+        chunk[i] ^= threefish_prev[i];
+    }
     let cipher = Threefish1024::new(&keys.tf_key_128.into());
     let block_ga: &mut GenericArray<u8, U128> = GenericArray::from_mut_slice(chunk);
     cipher.encrypt_block(block_ga);
+    threefish_prev.copy_from_slice(chunk); // Update previous block for next iteration
     
-    debug!("ENCRYPT: After Threefish: {:02x?}", &chunk[..16]);
+    debug!("ENCRYPT: After Threefish CBC: {:02x?}", &chunk[..16]);
     
-    // Serpent encryption - batched 8-block processing
-    serpent_encrypt_8blocks(chunk, &keys.serpent_key)?;
+    // Serpent CBC encryption - process 8 blocks of 16 bytes each
+    serpent_encrypt_8blocks_cbc(chunk, &keys.serpent_key, serpent_prev)?;
     
-    debug!("ENCRYPT: After Serpent: {:02x?}", &chunk[..16]);
+    debug!("ENCRYPT: After Serpent CBC: {:02x?}", &chunk[..16]);
     
     Ok(())
 }
 
-// Ultra-optimized Serpent processing using single cipher instance
+// Legacy ECB function for compatibility (if needed)
+#[inline(always)]
+fn triple_encrypt_chunk_inplace(chunk: &mut [u8; CHUNK_SIZE], keys: &TripleCipherKeys) -> Result<(), CryptoError> {
+    // Initialize CBC state with IVs
+    let mut threefish_prev = keys.threefish_iv;
+    let mut serpent_prev = keys.serpent_iv;
+    triple_encrypt_chunk_inplace_cbc(chunk, keys, &mut threefish_prev, &mut serpent_prev)
+}
+
+// Serpent CBC encryption for 8 blocks (128 bytes)
+#[inline(always)]
+fn serpent_encrypt_8blocks_cbc(data: &mut [u8; CHUNK_SIZE], key: &[u8; 32], prev_block: &mut [u8; 16]) -> Result<(), CryptoError> {
+    use serpent::{Serpent, cipher::KeyInit};
+    
+    let cipher = Serpent::new_from_slice(key)
+        .map_err(|_| CryptoError::KeyGenerationFailed)?;
+    
+    for i in 0..8 {
+        let block_start = i * 16;
+        let block_end = block_start + 16;
+        
+        // Direct in-place operation with zero-copy
+        let block_slice = &mut data[block_start..block_end];
+        let block_array: &mut [u8; 16] = block_slice.try_into()
+            .map_err(|_| CryptoError::InvalidInput)?;
+        
+        // CBC: XOR with previous ciphertext block before encryption
+        for j in 0..16 {
+            block_array[j] ^= prev_block[j];
+        }
+        
+        serpent_encrypt_inplace(&cipher, block_array);
+        
+        // Update previous block for next iteration
+        prev_block.copy_from_slice(block_array);
+    }
+    Ok(())
+}
+
+// Legacy ECB function for compatibility (if needed)
 #[inline(always)]
 fn serpent_encrypt_8blocks(data: &mut [u8; CHUNK_SIZE], key: &[u8; 32]) -> Result<(), CryptoError> {
     use serpent::{Serpent, cipher::KeyInit};
@@ -472,30 +540,84 @@ fn serpent_encrypt_8blocks(data: &mut [u8; CHUNK_SIZE], key: &[u8; 32]) -> Resul
     Ok(())
 }
 
-// Optimized in-place chunk decryption
+// CBC mode decryption for triple cipher (128-byte chunks)
 #[inline(always)]
-fn triple_decrypt_chunk_inplace(chunk: &mut [u8; CHUNK_SIZE], keys: &TripleCipherKeys) -> Result<(), CryptoError> {
+fn triple_decrypt_chunk_inplace_cbc(chunk: &mut [u8; CHUNK_SIZE], keys: &TripleCipherKeys, threefish_prev: &mut [u8; 128], serpent_prev: &mut [u8; 16]) -> Result<(), CryptoError> {
     use log::debug;
     
     // Log first 16 bytes before decryption
-    debug!("DECRYPT: Before Serpent: {:02x?}", &chunk[..16]);
+    debug!("DECRYPT: Before Serpent CBC: {:02x?}", &chunk[..16]);
     
-    // Serpent decryption - batched 8-block processing
-    serpent_decrypt_8blocks(chunk, &keys.serpent_key)?;
+    // Store original ciphertext for CBC
+    let serpent_ct_backup = chunk.clone();
     
-    debug!("DECRYPT: After Serpent: {:02x?}", &chunk[..16]);
+    // Serpent CBC decryption - process 8 blocks of 16 bytes each
+    serpent_decrypt_8blocks_cbc(chunk, &keys.serpent_key, serpent_prev)?;
     
-    // Threefish-1024 decryption (in-place)
+    debug!("DECRYPT: After Serpent CBC: {:02x?}", &chunk[..16]);
+    
+    // Store ciphertext for Threefish CBC
+    let threefish_ct_backup = chunk.clone();
+    
+    // Threefish-1024 CBC: decrypt, then XOR with previous block
     let cipher = Threefish1024::new(&keys.tf_key_128.into());
     let block_ga: &mut GenericArray<u8, U128> = GenericArray::from_mut_slice(chunk);
     cipher.decrypt_block(block_ga);
     
-    debug!("DECRYPT: After Threefish: {:02x?}", &chunk[..16]);
+    // XOR with previous ciphertext block
+    for i in 0..CHUNK_SIZE {
+        chunk[i] ^= threefish_prev[i];
+    }
+    threefish_prev.copy_from_slice(&threefish_ct_backup); // Update for next iteration
+    
+    debug!("DECRYPT: After Threefish CBC: {:02x?}", &chunk[..16]);
     
     Ok(())
 }
 
-// Ultra-optimized Serpent decryption using single cipher instance
+// Legacy ECB function for compatibility (if needed)
+#[inline(always)]
+fn triple_decrypt_chunk_inplace(chunk: &mut [u8; CHUNK_SIZE], keys: &TripleCipherKeys) -> Result<(), CryptoError> {
+    // Initialize CBC state with IVs
+    let mut threefish_prev = keys.threefish_iv;
+    let mut serpent_prev = keys.serpent_iv;
+    triple_decrypt_chunk_inplace_cbc(chunk, keys, &mut threefish_prev, &mut serpent_prev)
+}
+
+// Serpent CBC decryption for 8 blocks (128 bytes)
+#[inline(always)]
+fn serpent_decrypt_8blocks_cbc(data: &mut [u8; CHUNK_SIZE], key: &[u8; 32], prev_block: &mut [u8; 16]) -> Result<(), CryptoError> {
+    use serpent::{Serpent, cipher::KeyInit};
+    
+    let cipher = Serpent::new_from_slice(key)
+        .map_err(|_| CryptoError::KeyGenerationFailed)?;
+    
+    for i in 0..8 {
+        let block_start = i * 16;
+        let block_end = block_start + 16;
+        
+        // Direct in-place operation with zero-copy
+        let block_slice = &mut data[block_start..block_end];
+        let block_array: &mut [u8; 16] = block_slice.try_into()
+            .map_err(|_| CryptoError::InvalidInput)?;
+        
+        // Store original ciphertext for CBC
+        let ct_backup = *block_array;
+        
+        serpent_decrypt_inplace(&cipher, block_array);
+        
+        // CBC: XOR with previous ciphertext block after decryption
+        for j in 0..16 {
+            block_array[j] ^= prev_block[j];
+        }
+        
+        // Update previous block for next iteration
+        prev_block.copy_from_slice(&ct_backup);
+    }
+    Ok(())
+}
+
+// Legacy ECB function for compatibility (if needed)
 #[inline(always)]
 fn serpent_decrypt_8blocks(data: &mut [u8; CHUNK_SIZE], key: &[u8; 32]) -> Result<(), CryptoError> {
     use serpent::{Serpent, cipher::KeyInit};
