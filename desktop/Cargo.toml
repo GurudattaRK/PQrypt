@@ -1,0 +1,54 @@
+[package]
+name = "pqrypt"
+version = "0.1.0"
+edition = "2024"
+build = "build.rs"
+
+[lib]
+name = "pqrypt"
+path = "src/lib.rs"
+
+[[bin]]
+name = "pqrypt"
+path = "src/main.rs"
+
+
+[profile.release]
+opt-level = 3                    # Maximum optimization
+lto = "fat"                     # Full link-time optimization
+codegen-units = 1               # Single codegen unit for better optimization
+panic = "abort"                 # Smaller binary, faster execution
+strip = "debuginfo"             # Remove debug info from binary
+
+[dependencies]
+rfd = "0.15.4"
+slint = "1.8"
+libc = "0.2"
+aes-gcm = {version = "0.10.3", features = ["stream"]}
+aes = "0.8"
+ctr = "0.9"
+ghash = "0.5"
+subtle = "2.6"
+serpent = "0.5.1"
+x448 = "0.6.0"
+pqcrypto-traits = "0.3.5"
+pqcrypto-hqc = "0.2.2"
+argon2 = "0.5.3"
+rand = "0.8"
+getrandom = "0.2"
+zeroize = "1.7"
+fips203 = "0.4.3"
+p521 = { version = "0.13", features = ["ecdh"] }
+elliptic-curve = { version = "0.13", features = ["ecdh"] }
+bincode = "1.3"
+serde = { version = "1.0", features = ["derive"] }
+serde_arrays = "0.1"
+fips205 = "0.4"
+# Threefish-1024 integration
+threefish = "0.5.2"
+cipher = "0.4"
+
+[build-dependencies]
+slint-build = "1.8"
+
+
