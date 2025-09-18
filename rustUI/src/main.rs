@@ -155,15 +155,12 @@ fn main() -> Result<(), slint::PlatformError> {
             return;
         }
 
-        // Derive master key (Argon2 saltless, same as Android)
-        let master_key = if !key_file_path.is_empty() {
+        // Derive secret key from password or key file (match Android exactly)
+        let secret = if !key_file_path.is_empty() {
             match fs::read(&key_file_path) {
-                Ok(key_data) => match hash_password_or_keyfile(&key_data) {
-                    Ok(key) => key,
-                    Err(e) => {
-                        ui.set_output_file_path(std::format!("Key derivation error: {}", e).into());
-                        return;
-                    }
+                Ok(key_data) => {
+                    // Use first 128 bytes for key file mode to match Android
+                    if key_data.len() > 128 { key_data[..128].to_vec() } else { key_data }
                 },
                 Err(e) => {
                     ui.set_output_file_path(std::format!("Error reading key file: {}", e).into());
@@ -171,8 +168,9 @@ fn main() -> Result<(), slint::PlatformError> {
                 }
             }
         } else if !password.is_empty() {
+            // Derive 128-byte key from password using Argon2 (match Android key derivation)
             match hash_password_or_keyfile(password.as_bytes()) {
-                Ok(key) => key,
+                Ok(key) => key.to_vec(),
                 Err(e) => {
                     ui.set_output_file_path(std::format!("Key derivation error: {}", e).into());
                     return;
@@ -183,42 +181,9 @@ fn main() -> Result<(), slint::PlatformError> {
             return;
         };
 
-        // Read the file to encrypt
-        let file_data = match fs::read(&file_path) {
-            Ok(data) => data,
-            Err(e) => {
-                ui.set_output_file_path(std::format!("Error reading file: {}", e).into());
-                return;
-            }
-        };
-
-        // Encrypt the data (returns IV||ciphertext||TAG)
-        let blob = match rusty_api::api::triple_encrypt(&master_key, &file_data) {
-            Ok(data) => data,
-            Err(e) => {
-                ui.set_output_file_path(std::format!("Encryption error: {}", e).into());
-                return;
-            }
-        };
-
-        // Build PQRYPT header
-        let total_length = file_data.len();
-        let iv_size = rusty_api::AES256_IV_SIZE as usize;
-        let tag_size = rusty_api::AES256_TAG_SIZE as usize;
-        let ciphertext_len = if blob.len() >= iv_size + tag_size { blob.len() - iv_size - tag_size } else { 0 };
-        let chunk_count = if ciphertext_len == 0 { 0 } else { ciphertext_len / 128 };
-
-        let mut out = Vec::with_capacity(32 + blob.len());
-        out.extend_from_slice(b"PQRYPT\n");
-        out.extend_from_slice(total_length.to_string().as_bytes());
-        out.extend_from_slice(b"\n");
-        out.extend_from_slice(chunk_count.to_string().as_bytes());
-        out.extend_from_slice(b"\n");
-        out.extend_from_slice(&blob);
-
-        // Write header+blob to output file
-        let output_path = std::format!("{}.encrypted", file_path);
-        match fs::write(&output_path, out) {
+        // Use PQRYPT2 streaming encryption to match Android exactly
+        let output_path = std::format!("{}.pqrypt2", file_path);
+        match rusty_api::api::encrypt_file_pqrypt2(&file_path, &output_path, &secret) {
             Ok(_) => {
                 let full_output_path = std::path::Path::new(&output_path)
                     .canonicalize()
@@ -226,7 +191,7 @@ fn main() -> Result<(), slint::PlatformError> {
                 ui.set_output_file_path(full_output_path.to_string_lossy().to_string().into());
             }
             Err(e) => {
-                ui.set_output_file_path(std::format!("Error writing encrypted file: {}", e).into());
+                ui.set_output_file_path(std::format!("Encryption error: {}", e).into());
             }
         }
     });
@@ -244,15 +209,12 @@ fn main() -> Result<(), slint::PlatformError> {
             return;
         }
 
-        // Derive master key
-        let master_key = if !key_file_path.is_empty() {
+        // Derive secret key from password or key file (match Android exactly)
+        let secret = if !key_file_path.is_empty() {
             match fs::read(&key_file_path) {
-                Ok(key_data) => match hash_password_or_keyfile(&key_data) {
-                    Ok(key) => key,
-                    Err(e) => {
-                        ui.set_output_file_path(std::format!("Key derivation error: {}", e).into());
-                        return;
-                    }
+                Ok(key_data) => {
+                    // Use first 128 bytes for key file mode to match Android
+                    if key_data.len() > 128 { key_data[..128].to_vec() } else { key_data }
                 },
                 Err(e) => {
                     ui.set_output_file_path(std::format!("Error reading key file: {}", e).into());
@@ -260,8 +222,9 @@ fn main() -> Result<(), slint::PlatformError> {
                 }
             }
         } else if !password.is_empty() {
+            // Derive 128-byte key from password using Argon2 (match Android key derivation)
             match hash_password_or_keyfile(password.as_bytes()) {
-                Ok(key) => key,
+                Ok(key) => key.to_vec(),
                 Err(e) => {
                     ui.set_output_file_path(std::format!("Key derivation error: {}", e).into());
                     return;
@@ -272,49 +235,22 @@ fn main() -> Result<(), slint::PlatformError> {
             return;
         };
 
-        // Read the file to decrypt
-        let file_data = match fs::read(&file_path) {
-            Ok(data) => data,
-            Err(e) => {
-                ui.set_output_file_path(std::format!("Error reading file: {}", e).into());
-                return;
-            }
+        // Determine output path
+        let output_path = if file_path.ends_with(".pqrypt2") {
+            file_path.trim_end_matches(".pqrypt2").to_string()
+        } else if file_path.ends_with(".encrypted") {
+            file_path.trim_end_matches(".encrypted").to_string()
+        } else {
+            std::format!("{}.decrypted", file_path)
         };
 
-        // Parse PQRYPT header if present; else treat entire file as raw blob
-        let (original_len, blob_start) = match parse_pqrypt_header(&file_data) {
-            Ok((len, start)) => (len, start),
-            Err(_) => (0usize, 0usize), // No header; raw
-        };
-        let blob = &file_data[blob_start..];
-
-        // Decrypt the data
-        match rusty_api::api::triple_decrypt(&master_key, blob) {
-            Ok(decrypted_data) => {
-                // Trim to original length if header present and plausible
-                let final_data = if original_len > 0 && original_len <= decrypted_data.len() {
-                    decrypted_data[..original_len].to_vec()
-                } else {
-                    decrypted_data
-                };
-
-                let output_path = if file_path.ends_with(".encrypted") {
-                    file_path.trim_end_matches(".encrypted").to_string()
-                } else {
-                    std::format!("{}.decrypted", file_path)
-                };
-
-                match fs::write(&output_path, final_data) {
-                    Ok(_) => {
-                        let full_output_path = std::path::Path::new(&output_path)
-                            .canonicalize()
-                            .unwrap_or_else(|_| std::path::PathBuf::from(&output_path));
-                        ui.set_output_file_path(full_output_path.to_string_lossy().to_string().into());
-                    }
-                    Err(e) => {
-                        ui.set_output_file_path(std::format!("Error writing decrypted file: {}", e).into());
-                    }
-                }
+        // Use PQRYPT2 streaming decryption to match Android exactly
+        match rusty_api::api::decrypt_file_pqrypt2(&file_path, &output_path, &secret) {
+            Ok(_) => {
+                let full_output_path = std::path::Path::new(&output_path)
+                    .canonicalize()
+                    .unwrap_or_else(|_| std::path::PathBuf::from(&output_path));
+                ui.set_output_file_path(full_output_path.to_string_lossy().to_string().into());
             }
             Err(e) => {
                 ui.set_output_file_path(std::format!("Decryption failed: {}", e).into());

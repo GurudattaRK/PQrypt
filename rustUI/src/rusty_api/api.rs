@@ -5,8 +5,13 @@ use aes_gcm::{Aes256Gcm, Nonce};
 use super::constants_errors::*;
 use super::utils::*;
 use super::symmetric::*;
+use ctr::Ctr128BE;
+use aes::Aes256;
+use ghash::{GHash, universal_hash::UniversalHash, Key as GhashKey, Block as GhashBlock};
+use cipher::{KeyIvInit, StreamCipher, BlockEncrypt, BlockDecrypt};
+use subtle::ConstantTimeEq;
+use cipher::generic_array::GenericArray as Ga;
 use threefish::Threefish1024;
-use cipher::{BlockEncrypt, BlockDecrypt, KeyInit as _};
 use cipher::generic_array::GenericArray;
 use cipher::consts::U128;
 use argon2::{Argon2, Algorithm, Version, Params};
@@ -329,6 +334,271 @@ pub fn triple_decrypt(master_key: &[u8; 128], input: &[u8]) -> Result<Vec<u8>, C
     Ok(processed)
 }
 
+// PQRYPT2 streaming file encryption to match Android exactly
+pub fn encrypt_file_pqrypt2(
+    input_path: &str,
+    output_path: &str,
+    secret: &[u8],
+) -> Result<(), CryptoError> {
+    use std::fs::File;
+    use std::io::{Read, Write};
+    
+    // Android Argon2 params for file encryption (8 MiB, not 10 MiB)
+    let mem_kib = 8 * 1024; // 8 MiB to match Android exactly
+    let time_cost = 1;
+    let lanes = 1;
+
+    // Per-file random salt and AES nonce (match Android)
+    let mut salt = [0u8; 32];
+    secure_random_bytes(&mut salt)?;
+    let mut iv = [0u8; AES256_IV_SIZE];
+    secure_random_bytes(&mut iv)?;
+
+    // Derive keys using Android's exact parameters
+    let mut keys = derive_file_keys_from_secret(secret, &salt, mem_kib, time_cost, lanes)?;
+
+    // Build PQRYPT2 binary header (match Android exactly)
+    let header = build_pqrypt2_header(&salt, &iv, mem_kib, time_cost, lanes);
+
+    // Open files
+    let mut in_file = File::open(input_path).map_err(|_| CryptoError::InvalidInput)?;
+    let mut out_file = File::create(output_path).map_err(|_| CryptoError::InvalidInput)?;
+    
+    // Write header
+    out_file.write_all(&header).map_err(|_| CryptoError::InvalidInput)?;
+
+    // Init GCM state (match Android)
+    let (mut ctr, h, ek_j0) = gcm_encryptor_init(&keys.aes_key, &iv);
+    let mut ghash = GHash::new(GhashKey::from_slice(&h));
+    ghash.update_padded(&header); // header as AAD
+
+    // Streaming encryption
+    let mut io_buf = [0u8; 131072]; // 128 KiB buffer
+    let mut carry128 = Vec::with_capacity(128);
+    let mut total_plain_len: u64 = 0;
+    let mut total_ct_len: usize = 0;
+
+    loop {
+        let read_len = in_file.read(&mut io_buf).map_err(|_| CryptoError::InvalidInput)?;
+        if read_len == 0 { break; } // EOF
+        
+        total_plain_len = total_plain_len.saturating_add(read_len as u64);
+
+        // Prepare working buffer = carry128 + read bytes
+        let mut work_buf = Vec::with_capacity(carry128.len() + read_len);
+        work_buf.extend_from_slice(&carry128);
+        work_buf.extend_from_slice(&io_buf[..read_len]);
+        carry128.clear();
+
+        // Process multiple of 128B, then AES-CTR entire batch
+        let process_len = (work_buf.len() / CHUNK_SIZE) * CHUNK_SIZE;
+        let (process_slice, remainder) = work_buf.split_at(process_len);
+
+        if process_len > 0 {
+            // Triple encrypt in-place per 128B block
+            let mut process_vec = process_slice.to_vec();
+            let mut threefish_chain = keys.threefish_iv;
+            let mut serpent_chain = keys.serpent_iv;
+            
+            for chunk in process_vec.chunks_mut(CHUNK_SIZE) {
+                let chunk_array: &mut [u8; CHUNK_SIZE] = chunk.try_into().map_err(|_| CryptoError::InvalidInput)?;
+                triple_encrypt_chunk_inplace(chunk_array, &keys, &mut threefish_chain, &mut serpent_chain)?;
+            }
+
+            // AES-CTR encrypt the ENTIRE processed vector
+            ctr.apply_keystream(&mut process_vec);
+
+            // Update GHASH with ciphertext
+            ghash_update_blocks(&mut ghash, &process_vec);
+            
+            // Write processed vector
+            out_file.write_all(&process_vec).map_err(|_| CryptoError::InvalidInput)?;
+            total_ct_len += process_vec.len();
+        }
+
+        // Save remainder (<128) for next read
+        carry128.clear();
+        carry128.extend_from_slice(remainder);
+    }
+
+    // Handle final residual: pad to 128B if needed
+    if !carry128.is_empty() {
+        let mut last_block = [0u8; CHUNK_SIZE];
+        last_block[..carry128.len()].copy_from_slice(&carry128);
+        
+        // Triple encrypt
+        let mut threefish_chain = keys.threefish_iv;
+        let mut serpent_chain = keys.serpent_iv;
+        triple_encrypt_chunk_inplace(&mut last_block, &keys, &mut threefish_chain, &mut serpent_chain)?;
+        
+        // AES-CTR
+        let mut last_vec = last_block.to_vec();
+        ctr.apply_keystream(&mut last_vec);
+        
+        // GHASH and write
+        ghash_update_blocks(&mut ghash, &last_vec);
+        out_file.write_all(&last_vec).map_err(|_| CryptoError::InvalidInput)?;
+        total_ct_len += last_vec.len();
+    }
+
+    // Trailer: original plaintext length (u64 LE)
+    let trailer = total_plain_len.to_le_bytes();
+    ghash.update_padded(&trailer);
+    out_file.write_all(&trailer).map_err(|_| CryptoError::InvalidInput)?;
+
+    // Finalize GHASH with lengths and compute tag
+    let aad_len = header.len() + trailer.len();
+    ghash_append_lengths(&mut ghash, aad_len, total_ct_len);
+    let s_tag_ga = ghash.clone().finalize();
+    let s_tag_slice: &[u8] = s_tag_ga.as_slice();
+    let mut tag = [0u8; 16];
+    for i in 0..16 { tag[i] = ek_j0[i] ^ s_tag_slice[i]; }
+
+    // Write authentication tag
+    out_file.write_all(&tag).map_err(|_| CryptoError::InvalidInput)?;
+
+    // Zeroize sensitive material
+    keys.aes_key.zeroize();
+    keys.serpent_key.zeroize();
+    keys.tf_key_128.zeroize();
+    keys.serpent_iv.zeroize();
+    keys.threefish_iv.zeroize();
+
+    Ok(())
+}
+
+// PQRYPT2 streaming file decryption to match Android exactly
+pub fn decrypt_file_pqrypt2(
+    input_path: &str,
+    output_path: &str,
+    secret: &[u8],
+) -> Result<(), CryptoError> {
+    use std::fs::File;
+    use std::io::{Read, Write};
+    
+    let mut in_file = File::open(input_path).map_err(|_| CryptoError::InvalidInput)?;
+    let mut out_file = File::create(output_path).map_err(|_| CryptoError::InvalidInput)?;
+    
+    // Read and parse PQRYPT2 binary header
+    let mut header = vec![0u8; 74]; // PQRYPT2 header is 74 bytes
+    in_file.read_exact(&mut header).map_err(|_| CryptoError::InvalidInput)?;
+    
+    if &header[0..8] != b"PQRYPT2\0" { return Err(CryptoError::InvalidInput); }
+    if header[8] != 1 { return Err(CryptoError::InvalidInput); } // version
+    let flags = header[9];
+    if (flags & 0x01) == 0 { return Err(CryptoError::InvalidInput); } // FLAG_SINGLE_TAG
+    if (flags & 0x02) == 0 { return Err(CryptoError::InvalidInput); } // FLAG_TRAILER_LEN
+    
+    let mem_kib = u32::from_le_bytes(header[10..14].try_into().unwrap());
+    let time_cost = u32::from_le_bytes(header[14..18].try_into().unwrap());
+    let lanes = u32::from_le_bytes(header[18..22].try_into().unwrap());
+    let mut salt = [0u8; 32]; salt.copy_from_slice(&header[22..54]);
+    let mut iv = [0u8; AES256_IV_SIZE]; iv.copy_from_slice(&header[54..66]);
+
+    // Derive keys
+    let mut keys = derive_file_keys_from_secret(secret, &salt, mem_kib, time_cost, lanes)?;
+
+    // Init GCM state
+    let (mut ctr, h, ek_j0) = gcm_encryptor_init(&keys.aes_key, &iv);
+    let mut ghash = GHash::new(GhashKey::from_slice(&h));
+    ghash.update_padded(&header);
+
+    // Streaming decrypt while reserving last 24 bytes (trailer 8 + tag 16)
+    let mut io_buf = [0u8; 131072]; // 128 KiB buffer
+    let mut all_ciphertext = Vec::new();
+    
+    // Read all remaining data
+    loop {
+        let read_len = in_file.read(&mut io_buf).map_err(|_| CryptoError::InvalidInput)?;
+        if read_len == 0 { break; }
+        all_ciphertext.extend_from_slice(&io_buf[..read_len]);
+    }
+    
+    if all_ciphertext.len() < 24 { return Err(CryptoError::InvalidInput); }
+    
+    // Split ciphertext, trailer, and tag
+    let ct_len = all_ciphertext.len() - 24;
+    let (ciphertext, trailer_and_tag) = all_ciphertext.split_at(ct_len);
+    let (trailer, tag_bytes) = trailer_and_tag.split_at(8);
+    let mut tag_in_arr = [0u8; 16];
+    tag_in_arr.copy_from_slice(tag_bytes);
+
+    // Process ciphertext in chunks
+    let mut all_plaintext = Vec::with_capacity(ciphertext.len());
+    let mut threefish_chain = keys.threefish_iv;
+    let mut serpent_chain = keys.serpent_iv;
+    
+    // GHASH all ciphertext
+    ghash_update_blocks(&mut ghash, ciphertext);
+    
+    let mut ct_copy = ciphertext.to_vec();
+    
+    // Process complete 128-byte chunks
+    let complete_chunks = ct_copy.len() / CHUNK_SIZE;
+    for i in 0..complete_chunks {
+        let chunk_start = i * CHUNK_SIZE;
+        let chunk_end = chunk_start + CHUNK_SIZE;
+        let chunk_slice = &mut ct_copy[chunk_start..chunk_end];
+        let chunk_array: &mut [u8; CHUNK_SIZE] = chunk_slice.try_into().map_err(|_| CryptoError::InvalidInput)?;
+        
+        // CTR decrypt
+        ctr.apply_keystream(chunk_array);
+        // Reverse triple
+        triple_decrypt_chunk_inplace(chunk_array, &keys, &mut threefish_chain, &mut serpent_chain)?;
+        
+        all_plaintext.extend_from_slice(chunk_array);
+    }
+    
+    // Handle remaining bytes (less than 128)
+    let remaining_start = complete_chunks * CHUNK_SIZE;
+    if remaining_start < ct_copy.len() {
+        let mut last_block = [0u8; CHUNK_SIZE];
+        let remaining_len = ct_copy.len() - remaining_start;
+        last_block[..remaining_len].copy_from_slice(&ct_copy[remaining_start..]);
+        
+        // CTR decrypt
+        ctr.apply_keystream(&mut last_block);
+        // Reverse triple
+        triple_decrypt_chunk_inplace(&mut last_block, &keys, &mut threefish_chain, &mut serpent_chain)?;
+        
+        all_plaintext.extend_from_slice(&last_block[..remaining_len]);
+    }
+
+    // Include trailer as AAD in GHASH and finalize
+    ghash.update_padded(trailer);
+    let aad_len = header.len() + trailer.len();
+    ghash_append_lengths(&mut ghash, aad_len, ciphertext.len());
+    let s_tag_ga = ghash.clone().finalize();
+    let s_tag_slice: &[u8] = s_tag_ga.as_slice();
+    let mut tag = [0u8; 16];
+    for i in 0..16 { tag[i] = ek_j0[i] ^ s_tag_slice[i]; }
+
+    // Verify tag (constant time)
+    use subtle::ConstantTimeEq;
+    if tag.ct_eq(&tag_in_arr).unwrap_u8() == 0 {
+        return Err(CryptoError::AuthenticationFailed);
+    }
+
+    // Trim plaintext to original length and write
+    let orig_len = u64::from_le_bytes(trailer.try_into().unwrap()) as usize;
+    let final_plaintext = if orig_len <= all_plaintext.len() {
+        &all_plaintext[..orig_len]
+    } else {
+        &all_plaintext
+    };
+    
+    out_file.write_all(final_plaintext).map_err(|_| CryptoError::InvalidInput)?;
+
+    // Zeroize sensitive material
+    keys.aes_key.zeroize();
+    keys.serpent_key.zeroize();
+    keys.tf_key_128.zeroize();
+    keys.serpent_iv.zeroize();
+    keys.threefish_iv.zeroize();
+
+    Ok(())
+}
+
 // Password generation matching the Android implementation exactly
 pub fn generate_password(
     mode: u8,
@@ -596,4 +866,115 @@ pub fn pqc_4hybrid_recv_final(
     hybrid_receiver_state: &super::hybrid::HybridReceiverState
 ) -> Result<[u8; 128], CryptoError> {
     super::hybrid::pqc_4hybrid_recv_final(hybrid_3_key, hybrid_receiver_state)
+}
+
+// Build PQRYPT2 binary header to match Android exactly
+#[inline]
+fn build_pqrypt2_header(
+    salt: &[u8; 32],
+    nonce: &[u8; AES256_IV_SIZE],
+    mem_kib: u32,
+    time_cost: u32,
+    lanes: u32,
+) -> Vec<u8> {
+    let mut header = Vec::with_capacity(74);
+    header.extend_from_slice(b"PQRYPT2\0");  // 8 bytes magic
+    header.push(1);                           // 1 byte version
+    header.push(0x01 | 0x02);                // 1 byte flags (SINGLE_TAG | TRAILER_LEN)
+    header.extend_from_slice(&mem_kib.to_le_bytes());   // 4 bytes
+    header.extend_from_slice(&time_cost.to_le_bytes()); // 4 bytes
+    header.extend_from_slice(&lanes.to_le_bytes());     // 4 bytes
+    header.extend_from_slice(salt);                     // 32 bytes
+    header.extend_from_slice(nonce);                    // 12 bytes
+    header.extend_from_slice(&[0u8; 8]);               // 8 bytes reserved
+    header
+}
+
+// Derive file encryption keys from secret using Android's exact parameters
+#[inline]
+fn derive_file_keys_from_secret(
+    secret: &[u8],
+    salt: &[u8; 32],
+    mem_kib: u32,
+    time_cost: u32,
+    lanes: u32,
+) -> Result<TripleCipherKeys, CryptoError> {
+    // Derive 336 bytes for keys + CBC IVs (match Android exactly)
+    let mut derived = argon2id_hash(secret, salt, 336, mem_kib, time_cost, lanes)?;
+    if derived.len() != 336 { return Err(CryptoError::KeyDerivationFailed); }
+
+    let mut tf_key_128 = [0u8; 128];
+    tf_key_128.copy_from_slice(&derived[0..128]);
+    let mut serpent_key = [0u8; 32];
+    serpent_key.copy_from_slice(&derived[128..160]);
+    let mut aes_key = [0u8; 32];
+    aes_key.copy_from_slice(&derived[160..192]);
+    let mut serpent_iv = [0u8; 16];
+    serpent_iv.copy_from_slice(&derived[192..208]);
+    let mut threefish_iv = [0u8; 128];
+    threefish_iv.copy_from_slice(&derived[208..336]);
+
+    derived.zeroize();
+    Ok(TripleCipherKeys { aes_key, serpent_key, tf_key_128, serpent_iv, threefish_iv })
+}
+
+// GCM encryptor initialization (match Android)
+#[inline]
+fn gcm_encryptor_init(
+    aes_key: &[u8; 32],
+    nonce: &[u8; AES256_IV_SIZE],
+) -> (Ctr128BE<Aes256>, [u8; 16], [u8; 16]) {
+    // Build J0 and initial CTR = inc32(J0)
+    let mut j0 = [0u8; 16];
+    j0[..12].copy_from_slice(nonce);
+    j0[12..].copy_from_slice(&1u32.to_be_bytes());
+
+    // initial counter = J0 + 1
+    let mut ctr0 = j0;
+    let c = u32::from_be_bytes([ctr0[12], ctr0[13], ctr0[14], ctr0[15]]).wrapping_add(1);
+    ctr0[12..].copy_from_slice(&c.to_be_bytes());
+
+    // init CTR stream cipher
+    let ctr = Ctr128BE::<Aes256>::new(Ga::from_slice(aes_key), Ga::from_slice(&ctr0));
+
+    // compute subkey H and E(K, J0)
+    let h = aes_gcm_subkey_h(aes_key);
+    let cipher = Aes256::new(Ga::from_slice(aes_key));
+    let mut ek_j0 = j0;
+    let mut ekj0_ga = Ga::from_mut_slice(&mut ek_j0);
+    cipher.encrypt_block(&mut ekj0_ga);
+
+    (ctr, h, ek_j0)
+}
+
+// Compute AES-GCM subkey H
+#[inline]
+fn aes_gcm_subkey_h(aes_key: &[u8; 32]) -> [u8; 16] {
+    // H = E(K, 0^128)
+    let cipher = Aes256::new(Ga::from_slice(aes_key));
+    let mut block = [0u8; 16];
+    let mut ga = Ga::from_mut_slice(&mut block);
+    cipher.encrypt_block(&mut ga);
+    block
+}
+
+// GHASH block update
+#[inline]
+fn ghash_update_blocks(gh: &mut GHash, buf: &[u8]) {
+    for chunk in buf.chunks(16) {
+        let mut block = [0u8; 16];
+        block[..chunk.len()].copy_from_slice(chunk);
+        let ga = GhashBlock::from_slice(&block);
+        gh.update(&[*ga]);
+    }
+}
+
+// GHASH length finalization
+#[inline]
+fn ghash_append_lengths(gh: &mut GHash, aad_len: usize, ct_len: usize) {
+    let mut len_block = [0u8; 16];
+    len_block[0..8].copy_from_slice(&((aad_len * 8) as u64).to_be_bytes());
+    len_block[8..16].copy_from_slice(&((ct_len * 8) as u64).to_be_bytes());
+    let ga = GhashBlock::from_slice(&len_block);
+    gh.update(&[*ga]);
 }
