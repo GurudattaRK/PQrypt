@@ -35,6 +35,7 @@ pub fn crypto_kyber1024_keypair() -> Result<
     Ok((pk, sk))
 }
 
+//MARK: crypto_kyber1024_encaps
 /// Encapsulate using a public key provided as a fixed-size array.
 /// Returns (ciphertext, shared_secret) as fixed-size arrays.
 pub fn crypto_kyber1024_encaps(
@@ -53,6 +54,7 @@ pub fn crypto_kyber1024_encaps(
     Ok((ct_bytes, ss_bytes))
 }
 
+//MARK: crypto_kyber1024_decaps
 /// Decapsulate using ciphertext and secret key (both as fixed-size arrays).
 /// Returns the shared secret as a fixed-size array.
 pub fn crypto_kyber1024_decaps(
@@ -84,6 +86,7 @@ pub fn crypto_hqc256_keypair() -> Result<([u8; HQC256_PUBLICKEYBYTES], [u8; HQC2
     Ok((pk_bytes, sk_bytes))
 }
 
+//MARK: crypto_hqc256_encaps
 pub fn crypto_hqc256_encaps(public_key: &[u8]) -> Result<(Vec<u8>, [u8; HQC256_SHAREDSECRETBYTES]), CryptoError> {
     if public_key.len() != HQC256_PUBLICKEYBYTES {
         return Err(CryptoError::InvalidInput);
@@ -101,6 +104,7 @@ pub fn crypto_hqc256_encaps(public_key: &[u8]) -> Result<(Vec<u8>, [u8; HQC256_S
     Ok((ct_bytes, ss_bytes))
 }
 
+//MARK: crypto_hqc256_decaps
 pub fn crypto_hqc256_decaps(
     ciphertext: &[u8], 
     secret_key: &[u8]
@@ -133,6 +137,7 @@ pub fn crypto_x448_keypair() -> Result<([u8; X448_KEY_SIZE], [u8; X448_KEY_SIZE]
     Ok((public_key, private_key))
 }
 
+//MARK: crypto_x448_shared_secret
 pub fn crypto_x448_shared_secret(
     their_public: &[u8; X448_KEY_SIZE], 
     my_private: &[u8; X448_KEY_SIZE]
@@ -159,6 +164,7 @@ pub fn crypto_p521_keypair() -> Result<([u8; P521_KEY_SIZE], [u8; P521_SECRET_SI
     Ok((public_bytes, secret_bytes))
 }
 
+//MARK: crypto_p521_shared_secret
 pub fn crypto_p521_shared_secret(
     their_public: &[u8; P521_KEY_SIZE], 
     my_private: &[u8; P521_SECRET_SIZE]
@@ -187,6 +193,7 @@ pub fn crypto_slh_dsa_keypair() -> Result<([u8; SLH_DSA_PUBKEYBYTES], [u8; SLH_D
     Ok((pk_bytes, sk_bytes))
 }
 
+//MARK: crypto_slh_dsa_sign
 /// Sign message with SLH-DSA. `aad` is optional associated data for domain separation; pass empty slice if unused.
 pub fn crypto_slh_dsa_sign(
     secret_key: &[u8; SLH_DSA_SECRETKEYBYTES],
@@ -202,6 +209,7 @@ pub fn crypto_slh_dsa_sign(
     Ok(signature)
 }
 
+//MARK: crypto_slh_dsa_verify
 /// Verify SLH-DSA signature. Returns true if valid.
 pub fn crypto_slh_dsa_verify(
     public_key: &[u8; SLH_DSA_PUBKEYBYTES],

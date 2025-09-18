@@ -7,7 +7,6 @@ import android.os.Bundle // Activity lifecycle state container
 import android.os.ParcelFileDescriptor
 import android.provider.DocumentsContract // SAF contract constants/utilities
 import android.provider.OpenableColumns
-import android.util.Log
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity // Base class for activities with support features
@@ -257,21 +256,17 @@ class FileEncryptionActivity : AppCompatActivity() { // UI for selecting files a
         })
 
         binding.btnEncrypt.setOnClickListener { // Handle encrypt button press
-            android.util.Log.d("FileEncryption", "Encrypt button clicked") // Trace action
-            android.util.Log.d("FileEncryption", "selectedFileUri: $selectedFileUri") // Debug selected input
-            android.util.Log.d("FileEncryption", "passwordKey: ${passwordKey?.size} bytes") // Debug key presence/size
 
             // Ensure password key is generated before encryption
             if (selectedFileUri != null) { // Proceed only if an input file has been chosen
-                android.util.Log.d("FileEncryption", "File is selected, checking password key") // Trace state
+                // android.util.Log.d("FileEncryption", "File is selected, checking password key") // Trace state
                 if (passwordKey == null && (binding.etPassword.text.isNotEmpty() || isUsingKeyFile)) { // Key missing but inputs present
-                    android.util.Log.d("FileEncryption", "Password key is null, generating...") // Will derive now
+                    // android.util.Log.d("FileEncryption", "Password key is null, generating...") // Will derive now
                     if (isUsingKeyFile) deriveKeyFromKeyFilePreview() else generatePasswordKey() // Choose derivation source
                     // Wait a moment for key generation, then try again
                     CoroutineScope(Dispatchers.Main).launch { // Delay to allow async derivation to complete
                         delay(500)
                         if (passwordKey != null) { // If key now available
-                            android.util.Log.d("FileEncryption", "Password key generated, starting encryption") // Proceed
                             if (pickedFolderUri == null) { // Ensure we have an output folder
                                 pendingAction = "encrypt" // Remember desired action
                                 launchPickFolder() // Ask user to choose folder
@@ -283,12 +278,11 @@ class FileEncryptionActivity : AppCompatActivity() { // UI for selecting files a
                                 performEncryption() // Begin encryption workflow
                             }
                         } else { // Derivation still not ready/failed
-                            android.util.Log.e("FileEncryption", "Password key generation failed") // Log error
+                            // android.util.Log.e("FileEncryption", "Password key generation failed") // Log error
                             Toast.makeText(this@FileEncryptionActivity, "Please wait for password key generation to complete", Toast.LENGTH_SHORT).show() // Notify user
                         }
                     }
                 } else if (passwordKey != null) { // If key already present
-                    android.util.Log.d("FileEncryption", "Password key exists, starting encryption")
                     if (pickedFolderUri == null) {
                         pendingAction = "encrypt"
                         launchPickFolder()
@@ -300,31 +294,31 @@ class FileEncryptionActivity : AppCompatActivity() { // UI for selecting files a
                         performEncryption()
                     }
                 } else {
-                    android.util.Log.e("FileEncryption", "No password entered")
+                    // android.util.Log.e("FileEncryption", "No password entered")
                     Toast.makeText(this, if (isUsingKeyFile) "Please select files" else "Please select a file and enter password", Toast.LENGTH_SHORT).show()
                 }
             } else {
-                android.util.Log.e("FileEncryption", "No file selected")
+                // android.util.Log.e("FileEncryption", "No file selected")
                 Toast.makeText(this, "Please select a file first", Toast.LENGTH_SHORT).show()
             }
         }
 
         binding.btnDecrypt.setOnClickListener { // Handle decrypt button press
-            android.util.Log.d("FileEncryption", "Decrypt button clicked") // Trace action
-            android.util.Log.d("FileEncryption", "selectedFileUri: $selectedFileUri") // Debug selected input
-            android.util.Log.d("FileEncryption", "passwordKey: ${passwordKey?.size} bytes") // Debug key presence/size
+            // android.util.Log.d("FileEncryption", "Decrypt button clicked") // Trace action
+            // android.util.Log.d("FileEncryption", "selectedFileUri: $selectedFileUri") // Debug selected input
+            // android.util.Log.d("FileEncryption", "passwordKey: ${passwordKey?.size} bytes") // Debug key presence/size
 
             // Ensure password key is generated before decryption
             if (selectedFileUri != null) { // Proceed only if an input file has been chosen
-                android.util.Log.d("FileEncryption", "File is selected, checking password key") // Trace state
+                // android.util.Log.d("FileEncryption", "File is selected, checking password key") // Trace state
                 if (passwordKey == null && binding.etPassword.text.isNotEmpty()) { // Key missing but password entered
-                    android.util.Log.d("FileEncryption", "Password key is null, generating...") // Will derive now
+                    // android.util.Log.d("FileEncryption", "Password key is null, generating...") // Will derive now
                     generatePasswordKey() // Derive from entered password
                     // Wait a moment for key generation, then try again
                     CoroutineScope(Dispatchers.Main).launch { // Delay to allow async derivation to complete
                         delay(500)
                         if (passwordKey != null) { // If key now available
-                            android.util.Log.d("FileEncryption", "Password key generated, starting decryption") // Proceed
+                            // android.util.Log.d("FileEncryption", "Password key generated, starting decryption") // Proceed
                             if (pickedFolderUri == null) { // Ensure we have an output folder
                                 pendingAction = "decrypt" // Remember desired action
                                 launchPickFolder() // Ask user to choose folder
@@ -340,12 +334,12 @@ class FileEncryptionActivity : AppCompatActivity() { // UI for selecting files a
                                 performDecryption() // Begin decryption workflow
                             }
                         } else { // Derivation still not ready/failed
-                            android.util.Log.e("FileEncryption", "Password key generation failed") // Log error
+                            // android.util.Log.e("FileEncryption", "Password key generation failed") // Log error
                             Toast.makeText(this@FileEncryptionActivity, "Please wait for password key generation to complete", Toast.LENGTH_SHORT).show() // Notify user
                         }
                     }
                 } else if (passwordKey != null) { // If key already present
-                    android.util.Log.d("FileEncryption", "Password key exists, starting decryption") // Proceed
+                    // android.util.Log.d("FileEncryption", "Password key exists, starting decryption") // Proceed
                     if (pickedFolderUri == null) { // Ensure we have an output folder
                         pendingAction = "decrypt" // Remember desired action
                         launchPickFolder() // Ask user to choose folder
@@ -355,11 +349,11 @@ class FileEncryptionActivity : AppCompatActivity() { // UI for selecting files a
                         performDecryption() // Start decryption
                     }
                 } else { // No password provided
-                    android.util.Log.e("FileEncryption", "No password entered") // Log issue
+                    // android.util.Log.e("FileEncryption", "No password entered") // Log issue
                     Toast.makeText(this, "Please select a file and enter password", Toast.LENGTH_SHORT).show() // Prompt user
                 }
             } else { // No file chosen
-                android.util.Log.e("FileEncryption", "No file selected") // Log issue
+                // android.util.Log.e("FileEncryption", "No file selected") // Log issue
                 Toast.makeText(this, "Please select a file first", Toast.LENGTH_SHORT).show() // Prompt user
             }
         }
@@ -386,11 +380,11 @@ class FileEncryptionActivity : AppCompatActivity() { // UI for selecting files a
 
     private fun generatePasswordKey() { // Derive a 128-byte key from the entered password using Argon2 (no salt)
         val password = binding.etPassword.text.toString() // Read text from input field
-        android.util.Log.d("FileEncryption", "generatePasswordKey: password length=${password.length}")
+        // android.util.Log.d("FileEncryption", "generatePasswordKey: password length=${password.length}")
         if (password.isNotEmpty()) { // Only derive when non-empty
             CoroutineScope(Dispatchers.IO).launch { // Work off the main thread
                 try {
-                    android.util.Log.d("FileEncryption", "About to call RustyCrypto.argon2Hash for password key")
+                    // android.util.Log.d("FileEncryption", "About to call RustyCrypto.argon2Hash for password key")
                     // Argon2-only 128B with NO SALT (deterministic across platforms)
                     val salt = ByteArray(0) // Empty salt for deterministic behavior
                     val argonOut = RustyCrypto.argon2Hash( // Call into native to derive bytes
@@ -398,7 +392,7 @@ class FileEncryptionActivity : AppCompatActivity() { // UI for selecting files a
                         salt,
                         128
                     )
-                    android.util.Log.d("FileEncryption", "argon2Hash completed, result size: ${argonOut?.size}")
+                    // android.util.Log.d("FileEncryption", "argon2Hash completed, result size: ${argonOut?.size}")
                     if (argonOut == null || argonOut.size != 128) { // Validate output length
                         withContext(Dispatchers.Main) {
                             passwordKey = null // Clear on failure
@@ -414,7 +408,7 @@ class FileEncryptionActivity : AppCompatActivity() { // UI for selecting files a
                         Toast.makeText(this@FileEncryptionActivity, "Password key generated", Toast.LENGTH_SHORT).show() // Confirm
                     }
                 } catch (e: Exception) { // Handle derivation errors
-                    android.util.Log.e("FileEncryption", "Error in generatePasswordKey: ${e.javaClass.simpleName}: ${e.message}", e)
+                    // android.util.Log.e("FileEncryption", "Error in generatePasswordKey: ${e.javaClass.simpleName}: ${e.message}", e)
                     withContext(Dispatchers.Main) {
                         Toast.makeText(this@FileEncryptionActivity, "Error generating key: ${e.message}", Toast.LENGTH_SHORT).show() // Report
                     }
@@ -462,7 +456,7 @@ class FileEncryptionActivity : AppCompatActivity() { // UI for selecting files a
         CoroutineScope(Dispatchers.IO).launch {
             val startTime = System.currentTimeMillis()
             try {
-                android.util.Log.d("FileEncryption", "Starting streaming encryption")
+                // android.util.Log.d("FileEncryption", "Starting streaming encryption")
                 
                 // Derive secret from password or key file
                 val secret = if (isUsingKeyFile) {
@@ -493,7 +487,7 @@ class FileEncryptionActivity : AppCompatActivity() { // UI for selecting files a
                 }
                 
             } catch (e: Exception) {
-                android.util.Log.e("FileEncryption", "Encryption error: ${e.message}", e)
+                // android.util.Log.e("FileEncryption", "Encryption error: ${e.message}", e)
                 withContext(Dispatchers.Main) {
                     Toast.makeText(this@FileEncryptionActivity, "Encryption error: ${e.message}", Toast.LENGTH_SHORT).show()
                 }
@@ -505,7 +499,7 @@ class FileEncryptionActivity : AppCompatActivity() { // UI for selecting files a
         CoroutineScope(Dispatchers.IO).launch {
             val startTime = System.currentTimeMillis()
             try {
-                android.util.Log.d("FileEncryption", "Starting streaming decryption")
+                // android.util.Log.d("FileEncryption", "Starting streaming decryption")
                 
                 // Derive secret from password or key file
                 val secret = if (isUsingKeyFile) {
@@ -540,7 +534,7 @@ class FileEncryptionActivity : AppCompatActivity() { // UI for selecting files a
                 }
                 
             } catch (e: Exception) {
-                android.util.Log.e("FileEncryption", "Decryption error: ${e.message}", e)
+                // android.util.Log.e("FileEncryption", "Decryption error: ${e.message}", e)
                 withContext(Dispatchers.Main) {
                     Toast.makeText(this@FileEncryptionActivity, "Decryption error: ${e.message}", Toast.LENGTH_SHORT).show()
                 }
@@ -584,12 +578,12 @@ class FileEncryptionActivity : AppCompatActivity() { // UI for selecting files a
                     }
                     
                     // Debug logging
-                    android.util.Log.d("FileEncryption", "Secret length: ${secret.size}, isKeyFile: $isUsingKeyFile")
-                    android.util.Log.d("FileEncryption", "Input FD: ${inputFd.fd}, Output FD: ${outputFd.fd}")
+                    // android.util.Log.d("FileEncryption", "Secret length: ${secret.size}, isKeyFile: $isUsingKeyFile")
+                    // android.util.Log.d("FileEncryption", "Input FD: ${inputFd.fd}, Output FD: ${outputFd.fd}")
                     
                     // Call streaming encryption
                     val result = RustyCrypto.tripleEncryptFd(secret, isUsingKeyFile, inputFd.fd, outputFd.fd)
-                    android.util.Log.d("FileEncryption", "Encryption result code: $result")
+                    // android.util.Log.d("FileEncryption", "Encryption result code: $result")
                     
                     if (result != 0) {
                         throw IllegalStateException("Encryption failed with code: $result")
@@ -610,7 +604,7 @@ class FileEncryptionActivity : AppCompatActivity() { // UI for selecting files a
                 }
                 
             } catch (e: Exception) {
-                android.util.Log.e("FileEncryption", "Streaming encryption error: ${e.message}", e)
+                // android.util.Log.e("FileEncryption", "Streaming encryption error: ${e.message}", e)
                 withContext(Dispatchers.Main) {
                     Toast.makeText(this@FileEncryptionActivity, "Encryption error: ${e.message}", Toast.LENGTH_SHORT).show()
                 }
@@ -649,7 +643,7 @@ class FileEncryptionActivity : AppCompatActivity() { // UI for selecting files a
                         try {
                             contentResolver.delete(outputUri, null, null)
                         } catch (deleteEx: Exception) {
-                            android.util.Log.w("FileEncryption", "Failed to delete partial output: ${deleteEx.message}")
+                            // android.util.Log.w("FileEncryption", "Failed to delete partial output: ${deleteEx.message}")
                         }
                         throw IllegalStateException("Decryption failed with code: $result")
                     }
@@ -669,7 +663,7 @@ class FileEncryptionActivity : AppCompatActivity() { // UI for selecting files a
                 }
                 
             } catch (e: Exception) {
-                android.util.Log.e("FileEncryption", "Streaming decryption error: ${e.message}", e)
+                // android.util.Log.e("FileEncryption", "Streaming decryption error: ${e.message}", e)
                 withContext(Dispatchers.Main) {
                     Toast.makeText(this@FileEncryptionActivity, "Decryption error: ${e.message}", Toast.LENGTH_SHORT).show()
                 }
@@ -693,42 +687,70 @@ class FileEncryptionActivity : AppCompatActivity() { // UI for selecting files a
                 DocumentsContract.getTreeDocumentId(folderUri)
             )
             
+            // Check if file already exists using DocumentFile to avoid system auto-renaming
+            val treeDoc = DocumentFile.fromTreeUri(this, folderUri)
+            val existingFiles = treeDoc?.listFiles()?.mapNotNull { it.name }?.toSet() ?: emptySet()
+            
             // Generate unique filename by appending _copy if needed
             var uniqueFileName = fileName
             var copyCount = 0
             
-            while (copyCount <= 100) {
-                try {
-                    // Try to create document with current filename
-                    val resultUri = DocumentsContract.createDocument(
-                        contentResolver,
-                        docUri,
-                        "application/octet-stream",
-                        uniqueFileName
-                    )
-                    
-                    if (resultUri != null) {
-                        android.util.Log.d("FileEncryption", "Created file with unique name: $uniqueFileName")
-                        return resultUri
-                    }
-                    
-                    // If creation failed, try with _copy suffix
-                    copyCount++
-                    uniqueFileName = generateCopyFileName(fileName, copyCount)
-                    
-                } catch (e: Exception) {
-                    // If file exists or creation failed, try with _copy suffix
-                    copyCount++
-                    uniqueFileName = generateCopyFileName(fileName, copyCount)
-                }
+            // Pre-check if original filename exists and start with _copy if it does
+            while (existingFiles.contains(uniqueFileName) && copyCount <= 100) {
+                copyCount++
+                uniqueFileName = generateCopyFileName(fileName, copyCount)
             }
             
-            // If we exhausted all attempts
-            android.util.Log.e("FileEncryption", "Unable to create unique filename after 100 attempts")
-            null
+            // Now try to create the document with our pre-determined unique name
+            return try {
+                val resultUri = DocumentsContract.createDocument(
+                    contentResolver,
+                    docUri,
+                    "application/octet-stream",
+                    uniqueFileName
+                )
+                
+                if (resultUri != null) {
+                    // Verify the actual filename matches what we intended
+                    val actualName = getFileName(resultUri)
+                    if (actualName == uniqueFileName) {
+                        // android.util.Log.d("FileEncryption", "Created file with intended name: $uniqueFileName")
+                        resultUri
+                    } else {
+                        // System still modified the name, delete and try with next _copy iteration
+                        // android.util.Log.d("FileEncryption", "System modified filename from $uniqueFileName to $actualName, trying next iteration")
+                        contentResolver.delete(resultUri, null, null)
+                        
+                        // Try with next _copy iteration
+                        var nextCopyCount = copyCount + 1
+                        while (nextCopyCount <= 100) {
+                            val nextFileName = generateCopyFileName(fileName, nextCopyCount)
+                            if (!existingFiles.contains(nextFileName)) {
+                                val nextUri = DocumentsContract.createDocument(
+                                    contentResolver,
+                                    docUri,
+                                    "application/octet-stream",
+                                    nextFileName
+                                )
+                                if (nextUri != null && getFileName(nextUri) == nextFileName) {
+                                    return nextUri
+                                }
+                                nextUri?.let { contentResolver.delete(it, null, null) }
+                            }
+                            nextCopyCount++
+                        }
+                        null
+                    }
+                } else {
+                    null
+                }
+            } catch (e: Exception) {
+                // android.util.Log.e("FileEncryption", "Failed to create document: ${e.message}")
+                null
+            }
             
         } catch (e: Exception) {
-            android.util.Log.e("FileEncryption", "Failed to create file in folder: ${e.message}", e)
+            // android.util.Log.e("FileEncryption", "Failed to create file in folder: ${e.message}", e)
             null
         }
     }
@@ -901,10 +923,10 @@ class FileEncryptionActivity : AppCompatActivity() { // UI for selecting files a
 
     private fun updateButtonStates() { // Enable/disable actions based on current selections
         val canEncryptDecrypt = selectedFileUri != null && passwordKey != null // Need both file and key
-        android.util.Log.d("FileEncryption", "updateButtonStates: selectedFileUri=${selectedFileUri != null}, passwordKey=${passwordKey != null}, canEncryptDecrypt=$canEncryptDecrypt") // Trace
+        // android.util.Log.d("FileEncryption", "updateButtonStates: selectedFileUri=${selectedFileUri != null}, passwordKey=${passwordKey != null}, canEncryptDecrypt=$canEncryptDecrypt") // Trace
         binding.btnEncrypt.isEnabled = canEncryptDecrypt // Toggle encrypt button
         binding.btnDecrypt.isEnabled = canEncryptDecrypt // Toggle decrypt button
-        android.util.Log.d("FileEncryption", "Button states: encrypt=${binding.btnEncrypt.isEnabled}, decrypt=${binding.btnDecrypt.isEnabled}") // Trace
+        // android.util.Log.d("FileEncryption", "Button states: encrypt=${binding.btnEncrypt.isEnabled}, decrypt=${binding.btnDecrypt.isEnabled}") // Trace
     }
 
     // Add helper function to get filename from URI
@@ -946,7 +968,7 @@ class FileEncryptionActivity : AppCompatActivity() { // UI for selecting files a
                 else -> null // Unknown schemes
             }
         } catch (e: Exception) {
-            android.util.Log.w("FileEncryption", "Cannot resolve URI path: ${e.message}") // Log warning
+            // android.util.Log.w("FileEncryption", "Cannot resolve URI path: ${e.message}") // Log warning
             null // Fallback to null
         }
     }
@@ -954,7 +976,7 @@ class FileEncryptionActivity : AppCompatActivity() { // UI for selecting files a
     private data class Header(val originalLength: Int, val numChunks: Int, val binaryStart: Int, val salt: ByteArray?)
 
     private fun parseHeader(bytes: ByteArray): Header {
-        android.util.Log.d("FileEncryption", "parseHeader: Starting to parse header, bytes.size=${bytes.size}")
+        // android.util.Log.d("FileEncryption", "parseHeader: Starting to parse header, bytes.size=${bytes.size}")
 
         var index = 0
         fun readLine(): String {

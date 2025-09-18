@@ -9,7 +9,6 @@ use ctr::Ctr128BE;
 use aes::Aes256;
 use ghash::{GHash, universal_hash::UniversalHash, Key as GhashKey, Block as GhashBlock};
 use cipher::{KeyIvInit, StreamCipher, BlockEncrypt, BlockDecrypt};
-use subtle::ConstantTimeEq;
 use cipher::generic_array::GenericArray as Ga;
 use threefish::Threefish1024;
 use cipher::generic_array::GenericArray;
@@ -668,7 +667,7 @@ pub fn generate_password(
 
 // Secure password hash derivation function
 pub fn derive_password_hash_secure(
-    app_name: &str,
+    _app_name: &str,
     app_password: &str,
     master_password: &str,
     salt_source: &str

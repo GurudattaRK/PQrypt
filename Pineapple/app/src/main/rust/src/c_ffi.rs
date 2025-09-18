@@ -2,14 +2,12 @@ use std::ffi::CString;
 use std::os::raw::{c_char, c_int, c_uchar};
 use std::ptr;
 use std::slice;
-use std::os::unix::io::FromRawFd;
 use libc::{self, size_t};
-use log::{debug, error, info, warn, Level};
-use android_logger::{Config, FilterBuilder};
+use log::{debug, info};
+use android_logger::Config;
 use crate::rusty_api::api::{*, triple_decrypt_fd_raw};
-use crate::rusty_api::constants_errors::{CryptoError, *};
+use crate::rusty_api::constants_errors::*;
 use crate::rusty_api::symmetric::argon2id_hash;
-use crate::rusty_api::asymmetric::{crypto_kyber1024_keypair, crypto_x448_keypair};
 use crate::rusty_api::hybrid::{pqc_4hybrid_init, pqc_4hybrid_recv, pqc_4hybrid_snd_final, pqc_4hybrid_recv_final, HybridSenderState, HybridReceiverState};
 
 // Direct NDK logging as alternative to rust log crate
@@ -45,47 +43,6 @@ pub extern "C" fn init_rust_logger() {
             .with_tag("RustyCrypto")
     );
     info!("Rust logger initialized");
-}
-
-// Argon2 password hashing - true variable-length output
-#[no_mangle]
-pub extern "C" fn argon2_hash_c(
-    password: *const c_uchar,
-    password_len: usize,
-    salt: *const c_uchar,
-    salt_len: usize,
-    output: *mut c_uchar,
-    output_len: usize,
-) -> c_int {
-    if password.is_null() || output.is_null() || output_len == 0 {
-        return CRYPTO_ERROR_NULL_POINTER;
-    }
-
-    let password_slice = unsafe { slice::from_raw_parts(password, password_len) };
-    let mut salt_array = [0u8; 32];
-    if !salt.is_null() && salt_len > 0 {
-        let salt_slice = unsafe { slice::from_raw_parts(salt, salt_len.min(32)) };
-        salt_array[..salt_slice.len()].copy_from_slice(salt_slice);
-    }
-
-    use argon2::{Argon2, Algorithm, Version, Params};
-
-    // 10MB memory, 2 iterations, 1 thread, caller-specified output length
-    let params = match Params::new(10240, 2, 1, Some(output_len)) {
-        Ok(p) => p,
-        Err(_) => return CRYPTO_ERROR_HASHING_FAILED,
-    };
-    let argon2 = Argon2::new(Algorithm::Argon2id, Version::V0x13, params);
-
-    // Use first 16 bytes of salt for compatibility across platforms
-    let salt16 = &salt_array[..16];
-    let mut out_vec = vec![0u8; output_len];
-    if argon2.hash_password_into(password_slice, salt16, &mut out_vec).is_err() {
-        return CRYPTO_ERROR_HASHING_FAILED;
-    }
-
-    unsafe { ptr::copy_nonoverlapping(out_vec.as_ptr(), output, output_len); }
-    CRYPTO_SUCCESS
 }
 
 // =============================
@@ -405,203 +362,6 @@ pub extern "C" fn derive_password_hash_unified_128_c(
 
     unsafe { ptr::copy_nonoverlapping(final_hash.as_ptr(), out, 128); }
     CRYPTO_SUCCESS
-}
-
-// Triple encryption (AES + Serpent + ChaCha20)
-#[no_mangle]
-pub extern "C" fn triple_encrypt_c(
-    key: *const c_uchar,
-    plaintext: *const c_uchar,
-    plaintext_len: usize,
-    output: *mut c_uchar,
-    output_len: *mut usize,
-) -> c_int {
-    eprintln!("DEBUG: triple_encrypt_c called with plaintext_len: {}", plaintext_len);
-    
-    if key.is_null() || plaintext.is_null() || output.is_null() || output_len.is_null() {
-        eprintln!("DEBUG: Null pointer detected in encrypt");
-        return CRYPTO_ERROR_NULL_POINTER;
-    }
-
-    let key_slice = unsafe { slice::from_raw_parts(key, 128) };
-    let key_array: [u8; 128] = key_slice.try_into().map_err(|_| CRYPTO_ERROR_INVALID_INPUT).ok().unwrap_or([0u8; 128]);
-    let plaintext_slice = unsafe { slice::from_raw_parts(plaintext, plaintext_len) };
-
-    eprintln!("DEBUG: About to call triple_encrypt");
-    match triple_encrypt(&key_array, plaintext_slice) {
-        Ok(ciphertext) => {
-            eprintln!("DEBUG: triple_encrypt succeeded, ciphertext len: {}", ciphertext.len());
-            unsafe {
-                *output_len = ciphertext.len();
-                ptr::copy_nonoverlapping(ciphertext.as_ptr(), output, ciphertext.len());
-            }
-            CRYPTO_SUCCESS
-        }
-        Err(e) => {
-            eprintln!("DEBUG: triple_encrypt failed with error: {:?}", e);
-            CRYPTO_ERROR_ENCRYPTION_FAILED
-        },
-    }
-}
-
-// Test function to verify roundtrip
-#[no_mangle]
-pub extern "C" fn test_encrypt_decrypt_roundtrip() -> c_int {
-    // Create a test master key
-    let mut master_key = [0u8; 128];
-    for i in 0..128 {
-        master_key[i] = (i as u8) ^ 0x55;
-    }
-    
-    // Test data
-    let plaintext = b"Hello, World! This is a test message.";
-    
-    // Encrypt
-    match triple_encrypt(&master_key, plaintext) {
-        Ok(ciphertext) => {
-            // Decrypt
-            match triple_decrypt(&master_key, &ciphertext) {
-                Ok(decrypted) => {
-                    // Compare (accounting for padding)
-                    if &decrypted[..plaintext.len()] == plaintext {
-                        return CRYPTO_SUCCESS; // Test passed
-                    } else {
-                        return -99; // Data mismatch
-                    }
-                }
-                Err(_) => return -98, // Decryption failed
-            }
-        }
-        Err(_) => return -97, // Encryption failed
-    }
-}
-
-// Triple decryption - simplified version without debug prints
-#[no_mangle]
-pub extern "C" fn triple_decrypt_c(
-    key: *const c_uchar,
-    ciphertext: *const c_uchar,
-    ciphertext_len: usize,
-    output: *mut c_uchar,
-    output_len: *mut usize,
-) -> c_int {
-    // Check null pointers first
-    if key.is_null() || ciphertext.is_null() || output.is_null() || output_len.is_null() {
-        return CRYPTO_ERROR_NULL_POINTER;
-    }
-
-    // Create slices from pointers
-    let key_slice = unsafe { slice::from_raw_parts(key, 128) };
-    let key_array: [u8; 128] = match key_slice.try_into() {
-        Ok(arr) => arr,
-        Err(_) => return CRYPTO_ERROR_INVALID_INPUT,
-    };
-    let ciphertext_slice = unsafe { slice::from_raw_parts(ciphertext, ciphertext_len) };
-
-    // Call the actual decryption function
-    match triple_decrypt(&key_array, ciphertext_slice) {
-        Ok(plaintext) => {
-            unsafe {
-                *output_len = plaintext.len();
-                ptr::copy_nonoverlapping(plaintext.as_ptr(), output, plaintext.len());
-            }
-            CRYPTO_SUCCESS
-        }
-        Err(e) => {
-            // Return the specific debug code if available
-            match e {
-                crate::rusty_api::constants_errors::CryptoError::DebugCode(code) => code,
-                _ => CRYPTO_ERROR_DECRYPTION_FAILED,
-            }
-        }
-    }
-}
-
-// Password generation
-#[no_mangle]
-pub extern "C" fn generate_password_c(
-    mode: c_uchar,
-    hash_bytes: *const c_uchar,
-    hash_len: size_t,
-    desired_len: size_t,
-    enabled_symbol_sets: *const c_uchar,
-    output: *mut c_char,
-    output_len: *mut size_t,
-) -> c_int {
-    if hash_bytes.is_null() || enabled_symbol_sets.is_null() || 
-       output.is_null() || output_len.is_null() {
-        return CRYPTO_ERROR_NULL_POINTER;
-    }
-
-    let hash_slice = unsafe { slice::from_raw_parts(hash_bytes, hash_len) };
-    let enabled_slice = unsafe { slice::from_raw_parts(enabled_symbol_sets, 3) };
-    
-    let enabled_bool = [
-        enabled_slice[0] != 0,
-        enabled_slice[1] != 0,
-        enabled_slice[2] != 0,
-    ];
-
-    match generate_password(mode, hash_slice, desired_len, &enabled_bool) {
-        Some(password) => {
-            let password_cstr = match CString::new(password) {
-                Ok(s) => s,
-                Err(_) => return CRYPTO_ERROR_INVALID_INPUT,
-            };
-            let password_bytes = password_cstr.as_bytes_with_nul();
-            
-            unsafe {
-                *output_len = password_bytes.len() - 1; // Exclude null terminator from length
-                ptr::copy_nonoverlapping(password_bytes.as_ptr() as *const c_char, output, password_bytes.len());
-            }
-            CRYPTO_SUCCESS
-        }
-        None => CRYPTO_ERROR_KEY_GENERATION_FAILED,
-    }
-}
-
-// Basic Kyber keypair generation
-#[no_mangle]
-pub extern "C" fn kyber_keypair_c(
-    public_key: *mut c_uchar,
-    secret_key: *mut c_uchar,
-) -> c_int {
-    if public_key.is_null() || secret_key.is_null() {
-        return CRYPTO_ERROR_NULL_POINTER;
-    }
-
-    match crypto_kyber1024_keypair() {
-        Ok((pk, sk)) => {
-            unsafe {
-                ptr::copy_nonoverlapping(pk.as_ptr(), public_key, pk.len().min(1568));
-                ptr::copy_nonoverlapping(sk.as_ptr(), secret_key, sk.len().min(3168));
-            }
-            CRYPTO_SUCCESS
-        }
-        Err(_) => CRYPTO_ERROR_KEY_GENERATION_FAILED,
-    }
-}
-
-// Basic X448 keypair generation
-#[no_mangle]
-pub extern "C" fn x448_keypair_c(
-    public_key: *mut c_uchar,
-    private_key: *mut c_uchar,
-) -> c_int {
-    if public_key.is_null() || private_key.is_null() {
-        return CRYPTO_ERROR_NULL_POINTER;
-    }
-
-    match crypto_x448_keypair() {
-        Ok((pk, sk)) => {
-            unsafe {
-                ptr::copy_nonoverlapping(pk.as_ptr(), public_key, pk.len().min(56));
-                ptr::copy_nonoverlapping(sk.as_ptr(), private_key, sk.len().min(56));
-            }
-            CRYPTO_SUCCESS
-        }
-        Err(_) => CRYPTO_ERROR_KEY_GENERATION_FAILED,
-    }
 }
 
 // PQC 4-Algorithm Hybrid Key Exchange Functions

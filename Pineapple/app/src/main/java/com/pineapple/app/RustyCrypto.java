@@ -30,10 +30,7 @@ public class RustyCrypto { // Public JNI bridge class exposing native crypto met
     
     // Legacy functions - kept for backward compatibility during migration
     public static native byte[] argon2Hash(byte[] password, byte[] salt, int outputLength);
-    public static native int testCryptoRoundtrip();
     public static native byte[] derivePasswordHashUnified128(byte[] appName, byte[] appPassword, byte[] masterPassword);
-    public static native Object[] kyberKeypair();
-    public static native Object[] x448Keypair();
     
     // PQC 4-Algorithm Hybrid Key Exchange Functions (ML-KEM+X448 and HQC+P521)
     public static native Object[] pqc4HybridInit(); // Returns [hybrid1Key, senderState]

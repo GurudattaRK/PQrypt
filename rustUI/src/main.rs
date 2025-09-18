@@ -1,8 +1,7 @@
 use slint::ComponentHandle;
 use rfd::FileDialog;
-use std::path::PathBuf;
+use std::path::Path;
 use std::fs;
-use std::io::{self, Write};
 use std::time::Instant;
 
 use rust_ui::rusty_api;
@@ -36,6 +35,34 @@ fn hash_password_or_keyfile(data: &[u8]) -> Result<[u8; 128], rusty_api::CryptoE
     let mut result = [0u8; 128];
     result.copy_from_slice(&hash_vec);
     Ok(result)
+}
+
+// Helper function to generate unique filename with "_copy" suffix for duplicates
+fn generate_unique_filename(base_path: &str) -> String {
+    let path = Path::new(base_path);
+    
+    if !path.exists() {
+        return base_path.to_string();
+    }
+    
+    // Extract filename and extension
+    let parent = path.parent().unwrap_or(Path::new(""));
+    let stem = path.file_stem().unwrap_or(std::ffi::OsStr::new("file")).to_string_lossy();
+    let extension = path.extension().map(|e| format!(".{}", e.to_string_lossy())).unwrap_or_default();
+    
+    // Try with "_copy" suffix
+    for i in 1..=100 {
+        let copy_suffix = "_copy".repeat(i);
+        let new_filename = format!("{}{}{}", stem, copy_suffix, extension);
+        let new_path = parent.join(&new_filename);
+        
+        if !new_path.exists() {
+            return new_path.to_string_lossy().to_string();
+        }
+    }
+    
+    // Fallback if all attempts failed
+    base_path.to_string()
 }
 
 // Performance test function
@@ -182,7 +209,8 @@ fn main() -> Result<(), slint::PlatformError> {
         };
 
         // Use PQRYPT2 streaming encryption to match Android exactly
-        let output_path = std::format!("{}.pqrypt2", file_path);
+        let suggested_output_path = std::format!("{}.pqrypt2", file_path);
+        let output_path = generate_unique_filename(&suggested_output_path);
         match rusty_api::api::encrypt_file_pqrypt2(&file_path, &output_path, &secret) {
             Ok(_) => {
                 let full_output_path = std::path::Path::new(&output_path)
@@ -236,13 +264,15 @@ fn main() -> Result<(), slint::PlatformError> {
         };
 
         // Determine output path
-        let output_path = if file_path.ends_with(".pqrypt2") {
+        let suggested_output_path = if file_path.ends_with(".pqrypt2") {
             file_path.trim_end_matches(".pqrypt2").to_string()
         } else if file_path.ends_with(".encrypted") {
             file_path.trim_end_matches(".encrypted").to_string()
         } else {
             std::format!("{}.decrypted", file_path)
         };
+        
+        let output_path = generate_unique_filename(&suggested_output_path);
 
         // Use PQRYPT2 streaming decryption to match Android exactly
         match rusty_api::api::decrypt_file_pqrypt2(&file_path, &output_path, &secret) {
@@ -465,26 +495,3 @@ fn main() -> Result<(), slint::PlatformError> {
     ui.run()
 }
 
-// Parse PQRYPT header; returns (original_length, blob_start_offset)
-fn parse_pqrypt_header(bytes: &[u8]) -> Result<(usize, usize), ()> {
-    // Helper to read a line ending at '\n'
-    fn read_line(data: &[u8], mut idx: usize) -> Option<(String, usize)> {
-        let mut end = idx;
-        while end < data.len() && data[end] != b'\n' { end += 1; }
-        if end > data.len() { return None; }
-        let s = String::from_utf8_lossy(&data[idx..end]).to_string();
-        let next = if end < data.len() { end + 1 } else { end };
-        Some((s, next))
-    }
-
-    let mut idx = 0usize;
-    let (first, i1) = read_line(bytes, idx).ok_or(())?;
-    if first != "PQRYPT" { return Err(()); }
-    let (len_line, i2) = read_line(bytes, i1).ok_or(())?;
-    let (chunks_line, i3) = read_line(bytes, i2).ok_or(())?;
-    // Validate
-    let original_len: usize = len_line.parse().map_err(|_| ())?;
-    let _num_chunks: usize = chunks_line.parse().map_err(|_| ())?;
-    // The next byte is the start of the binary blob
-    Ok((original_len, i3))
-}

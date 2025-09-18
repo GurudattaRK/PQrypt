@@ -15,14 +15,13 @@ use super::constants_errors::*;
 use super::utils::*;
 use super::symmetric::*;
 use threefish::Threefish1024;
-use cipher::{BlockEncrypt, BlockDecrypt, KeyInit as _};
+use cipher::{BlockEncrypt, BlockDecrypt};
 use cipher::generic_array::GenericArray;
 use cipher::consts::U128;
 use zeroize::Zeroize;
 use std::os::raw::c_int;
 use libc;
 use subtle::ConstantTimeEq;
-use std::io::{Read, Write};
 
 // Debug file logging disabled in release builds
 
@@ -144,266 +143,7 @@ fn ghash_append_lengths(gh: &mut GHash, aad_len: usize, ct_len: usize) {
     gh.update_padded(&len_block);
 }
 
-pub fn triple_encrypt_fd(
-    secret: &[u8],
-    _is_keyfile: bool,
-    in_file: &mut std::fs::File,
-    out_file: &mut std::fs::File,
-) -> Result<(), CryptoError> {
-    use log::debug;
-    debug!("triple_encrypt_fd start: secret_len={}", secret.len());
-    
-    // Argon2 params for file encryption
-    let mem_kib = 8 * 1024; // 8 MiB
-    let time_cost = 1;
-    let lanes = 1;
 
-    // Per-file salt and AES nonce
-    let mut salt = [0u8; 32];
-    secure_random_bytes(&mut salt)?;
-    debug!("Generated salt");
-    let mut iv = [0u8; AES256_IV_SIZE];
-    secure_random_bytes(&mut iv)?;
-    debug!("Generated IV");
-
-    // Derive keys
-    debug!("About to derive keys");
-    let mut keys = derive_file_keys_from_secret(secret, &salt, mem_kib, time_cost, lanes)?;
-    debug!("Keys derived successfully");
-
-    // Build header and write it
-    debug!("Building header");
-    let header = build_header(&salt, &iv, mem_kib, time_cost, lanes);
-    out_file.write_all(&header).map_err(|_| CryptoError::InvalidInput)?;
-    debug!("Header written");
-
-    // Init GCM state
-    let (mut ctr, h, ek_j0) = gcm_encryptor_init(&keys.aes_key, &iv);
-    let mut ghash = GHash::new(ghash::Key::from_slice(&h));
-    ghash.update_padded(&header); // header as AAD
-
-    // Streaming buffers and CBC state
-    let mut io_buf = [0u8; IO_BUF_SIZE];
-    let mut carry128 = Vec::with_capacity(128); // carry for <128B residual between reads
-    let mut total_plain_len: u64 = 0;
-    let mut total_ct_len: usize = 0;
-    
-    // Initialize CBC state with IVs for streaming encryption
-    let mut threefish_prev = keys.threefish_iv;
-    let mut serpent_prev = keys.serpent_iv;
-
-    loop {
-        let read_len = in_file.read(&mut io_buf).map_err(|_| CryptoError::InvalidInput)?;
-        if read_len == 0 { break; }
-        total_plain_len = total_plain_len.saturating_add(read_len as u64);
-
-        // Prepare working buffer = carry128 + read bytes
-        let mut work: Vec<u8> = Vec::with_capacity(carry128.len() + read_len);
-        work.extend_from_slice(&carry128);
-        work.extend_from_slice(&io_buf[..read_len]);
-
-        let process_len = (work.len() / CHUNK_SIZE) * CHUNK_SIZE; // multiple of 128
-        let (process_slice, remainder) = work.split_at(process_len);
-
-        // Triple encrypt in-place per 128B block with CBC state
-        let mut process_vec = process_slice.to_vec();
-        for chunk in process_vec.chunks_mut(CHUNK_SIZE) {
-            let chunk_array: &mut [u8; CHUNK_SIZE] = chunk.try_into().map_err(|_| CryptoError::InvalidInput)?;
-            triple_encrypt_chunk_inplace_cbc(chunk_array, &keys, &mut threefish_prev, &mut serpent_prev)?;
-        }
-
-        // AES-CTR encrypt in-place
-        debug!("ENCRYPT: Before AES-CTR: {:02x?}", &process_vec[..16]);
-        ctr.apply_keystream(&mut process_vec);
-        debug!("ENCRYPT: After AES-CTR: {:02x?}", &process_vec[..16]);
-
-        // Update GHASH with ciphertext and write
-        ghash_update_blocks(&mut ghash, &process_vec);
-        out_file.write_all(&process_vec).map_err(|_| CryptoError::InvalidInput)?;
-        total_ct_len += process_vec.len();
-
-        // Save remainder (<128) to carry128 for next read
-        carry128.clear();
-        carry128.extend_from_slice(remainder);
-    }
-
-    // Handle final residual: pad to 128B if needed and process with CBC state
-    if !carry128.is_empty() {
-        let mut last_block = [0u8; CHUNK_SIZE];
-        last_block[..carry128.len()].copy_from_slice(&carry128);
-        // Triple encrypt with maintained CBC state
-        triple_encrypt_chunk_inplace_cbc(&mut last_block, &keys, &mut threefish_prev, &mut serpent_prev)?;
-        // AES-CTR
-        let mut last_vec = last_block.to_vec();
-        ctr.apply_keystream(&mut last_vec);
-        // GHASH and write
-        ghash_update_blocks(&mut ghash, &last_vec);
-        out_file.write_all(&last_vec).map_err(|_| CryptoError::InvalidInput)?;
-        total_ct_len += last_vec.len();
-    }
-
-    // Trailer: original plaintext length (u64 LE)
-    let trailer = total_plain_len.to_le_bytes();
-    ghash.update_padded(&trailer);
-
-    // Finalize GHASH with lengths and compute tag
-    let aad_len = header.len() + trailer.len();
-    ghash_append_lengths(&mut ghash, aad_len, total_ct_len);
-    let s_tag_ga = ghash.clone().finalize();
-    let s_tag_slice: &[u8] = s_tag_ga.as_slice();
-    let mut tag = [0u8; 16];
-    for i in 0..16 { tag[i] = ek_j0[i] ^ s_tag_slice[i]; }
-
-    // Write trailer then tag
-    out_file.write_all(&trailer).map_err(|_| CryptoError::InvalidInput)?;
-    out_file.write_all(&tag).map_err(|_| CryptoError::InvalidInput)?;
-
-    // Zeroize sensitive material
-    keys.aes_key.zeroize();
-    keys.serpent_key.zeroize();
-    keys.tf_key_128.zeroize();
-    keys.serpent_iv.zeroize();
-    keys.threefish_iv.zeroize();
-    salt.zeroize();
-    iv.zeroize();
-    io_buf.zeroize();
-    carry128.zeroize();
-
-    Ok(())
-}
-
-pub fn triple_decrypt_fd(
-    secret: &[u8],
-    _is_keyfile: bool,
-    in_file: &mut std::fs::File,
-    out_file: &mut std::fs::File,
-) -> Result<(), CryptoError> {
-    // Read and parse header
-    let mut header = vec![0u8; 8 + 1 + 1 + 4 + 4 + 4 + 32 + 12 + 8];
-    in_file.read_exact(&mut header).map_err(|_| CryptoError::InvalidInput)?;
-    if &header[0..8] != HEADER_MAGIC { return Err(CryptoError::InvalidInput); }
-    if header[8] != HEADER_VERSION { return Err(CryptoError::InvalidInput); }
-    let flags = header[9];
-    if (flags & FLAG_SINGLE_TAG) == 0 { return Err(CryptoError::InvalidInput); }
-    if (flags & FLAG_TRAILER_LEN) == 0 { return Err(CryptoError::InvalidInput); }
-    let mem_kib = u32::from_le_bytes(header[10..14].try_into().unwrap());
-    let time_cost = u32::from_le_bytes(header[14..18].try_into().unwrap());
-    let lanes = u32::from_le_bytes(header[18..22].try_into().unwrap());
-    let mut salt = [0u8; 32]; salt.copy_from_slice(&header[22..54]);
-    let mut iv = [0u8; AES256_IV_SIZE]; iv.copy_from_slice(&header[54..66]);
-
-    // Derive keys
-    let mut keys = derive_file_keys_from_secret(secret, &salt, mem_kib, time_cost, lanes)?;
-
-    // Init GCM state
-    let (mut ctr, h, ek_j0) = gcm_encryptor_init(&keys.aes_key, &iv);
-    let mut ghash = GHash::new(ghash::Key::from_slice(&h));
-    ghash.update_padded(&header);
-
-    // Streaming decrypt while reserving last 24 bytes (trailer 8 + tag 16)
-    let mut io_buf = [0u8; IO_BUF_SIZE];
-    let mut ring = Vec::with_capacity(IO_BUF_SIZE + 24);
-    let mut total_ct_len: usize = 0; // ciphertext length excluding trailer+tag
-    let mut all_plaintext = Vec::new(); // collect all plaintext for final trimming
-    
-    // Initialize CBC state with IVs for streaming decryption
-    let mut threefish_prev = keys.threefish_iv;
-    let mut serpent_prev = keys.serpent_iv;
-
-    loop {
-        let read_len = in_file.read(&mut io_buf).map_err(|_| CryptoError::InvalidInput)?;
-        if read_len == 0 { break; }
-        ring.extend_from_slice(&io_buf[..read_len]);
-
-        // While we have more than 24 bytes in ring, we can process bytes except the last 24
-        while ring.len() > 24 {
-            let to_process = ring.len() - 24;
-            // Limit processing to a multiple of 128 for triple pipeline
-            let proc_len = (to_process / CHUNK_SIZE) * CHUNK_SIZE;
-            if proc_len == 0 { break; }
-
-            // Take proc_len bytes as ciphertext
-            let mut ct_chunk = ring.drain(..proc_len).collect::<Vec<u8>>();
-            // Update GHASH with ciphertext
-            ghash_update_blocks(&mut ghash, &ct_chunk);
-            total_ct_len += ct_chunk.len();
-
-            // CTR decrypt in-place to get triple-processed bytes
-            debug!("DECRYPT: Before AES-CTR: {:02x?}", &ct_chunk[..16]);
-            ctr.apply_keystream(&mut ct_chunk);
-            debug!("DECRYPT: After AES-CTR: {:02x?}", &ct_chunk[..16]);
-
-            // Reverse triple pipeline per 128B
-            for chunk in ct_chunk.chunks_mut(CHUNK_SIZE) {
-                let chunk_array: &mut [u8; CHUNK_SIZE] = chunk.try_into().map_err(|_| CryptoError::InvalidInput)?;
-                triple_decrypt_chunk_inplace(chunk_array, &keys)?;
-            }
-
-            // Collect all plaintext for final trimming
-            all_plaintext.extend_from_slice(&ct_chunk);
-        }
-    }
-
-    // At EOF, ring contains remaining ciphertext + 24 bytes (trailer+tag)
-    if ring.len() < 24 { return Err(CryptoError::InvalidInput); }
-    let trailer_tag = ring.split_off(ring.len() - 24);
-    let trailer = &trailer_tag[..8];
-    let mut tag_in_arr = [0u8; 16];
-    tag_in_arr.copy_from_slice(&trailer_tag[8..24]);
-
-    // Any remaining ciphertext (multiple of 128 or zero)
-    let mut ct_rem = ring; // may be empty
-    if !ct_rem.is_empty() {
-        // Update GHASH
-        ghash_update_blocks(&mut ghash, &ct_rem);
-        total_ct_len += ct_rem.len();
-
-        // CTR decrypt in-place
-        ctr.apply_keystream(&mut ct_rem);
-        // Reverse triple
-        for chunk in ct_rem.chunks_mut(CHUNK_SIZE) {
-            let chunk_array: &mut [u8; CHUNK_SIZE] = chunk.try_into().map_err(|_| CryptoError::InvalidInput)?;
-            triple_decrypt_chunk_inplace(chunk_array, &keys)?;
-        }
-        
-        // Add remaining plaintext
-        all_plaintext.extend_from_slice(&ct_rem);
-    }
-
-    // Include trailer as AAD in GHASH and finalize
-    ghash.update_padded(trailer);
-    let aad_len = header.len() + trailer.len();
-    ghash_append_lengths(&mut ghash, aad_len, total_ct_len);
-    let s_tag_ga = ghash.clone().finalize();
-    let s_tag_slice: &[u8] = s_tag_ga.as_slice();
-    let mut tag = [0u8; 16];
-    for i in 0..16 { tag[i] = ek_j0[i] ^ s_tag_slice[i]; }
-
-    // Verify tag (constant time)
-    if tag.ct_eq(&tag_in_arr).unwrap_u8() == 0 {
-        return Err(CryptoError::AuthenticationFailed);
-    }
-
-    // Trim plaintext to original length and write
-    let orig_len = u64::from_le_bytes(trailer.try_into().unwrap()) as usize;
-    if orig_len <= all_plaintext.len() {
-        out_file.write_all(&all_plaintext[..orig_len]).map_err(|_| CryptoError::InvalidInput)?;
-    } else {
-        return Err(CryptoError::InvalidInput);
-    }
-
-    // Zeroize
-    keys.aes_key.zeroize();
-    keys.serpent_key.zeroize();
-    keys.tf_key_128.zeroize();
-    keys.serpent_iv.zeroize();
-    keys.threefish_iv.zeroize();
-    salt.zeroize();
-    iv.zeroize();
-    io_buf.zeroize();
-
-    Ok(())
-}
 
 // Cached keys structure for performance with CBC IVs
 struct TripleCipherKeys {
@@ -549,7 +289,7 @@ fn triple_decrypt_chunk_inplace_cbc(chunk: &mut [u8; CHUNK_SIZE], keys: &TripleC
     debug!("DECRYPT: Before Serpent CBC: {:02x?}", &chunk[..16]);
     
     // Store original ciphertext for CBC
-    let serpent_ct_backup = chunk.clone();
+    let _serpent_ct_backup = chunk.clone();
     
     // Serpent CBC decryption - process 8 blocks of 16 bytes each
     serpent_decrypt_8blocks_cbc(chunk, &keys.serpent_key, serpent_prev)?;
@@ -776,11 +516,11 @@ pub fn triple_decrypt(master_key: &[u8; 128], input: &[u8]) -> Result<Vec<u8>, C
     keys.serpent_key.zeroize();
     keys.tf_key_128.zeroize();
     
-    let elapsed = start_time.elapsed();
+    let _elapsed = start_time.elapsed();
     Ok(processed)
 }
 
-// Password generation matching the old working implementation
+//MARK: generate_password
 pub fn generate_password(
     mode: u8,
     hash_bytes: &[u8],
@@ -918,11 +658,13 @@ fn generate_charset_password(
 
 //MARK: LAYERED HYBRID KEY EXCHANGE (Kyber+X448 and HQC+P521)
 
+//MARK: pqc_4hybrid_init
 /// Initialize layered hybrid key exchange combining ML-KEM+X448 and HQC+P521
 pub fn pqc_4hybrid_init() -> Result<(Vec<u8>, super::hybrid::HybridSenderState), CryptoError> {
     super::hybrid::pqc_4hybrid_init()
 }
 
+//MARK: pqc_4hybrid_recv
 /// Layered hybrid receiver response
 pub fn pqc_4hybrid_recv(
     hybrid_1_key: &[u8]
@@ -930,6 +672,7 @@ pub fn pqc_4hybrid_recv(
     super::hybrid::pqc_4hybrid_recv(hybrid_1_key)
 }
 
+//MARK: pqc_4hybrid_snd_final
 /// Complete layered hybrid exchange with secure key expansion
 pub fn pqc_4hybrid_snd_final(
     hybrid_2_key: &[u8],
@@ -938,6 +681,7 @@ pub fn pqc_4hybrid_snd_final(
     super::hybrid::pqc_4hybrid_snd_final(hybrid_2_key, hybrid_sender_state)
 }
 
+//MARK: pqc_4hybrid_recv_final
 /// Finalize layered hybrid exchange  
 pub fn pqc_4hybrid_recv_final(
     hybrid_3_key: &[u8],
@@ -946,6 +690,7 @@ pub fn pqc_4hybrid_recv_final(
     super::hybrid::pqc_4hybrid_recv_final(hybrid_3_key, hybrid_receiver_state)
 }
 
+//MARK: triple_encrypt_fd_raw
 /// Raw FD version of triple_encrypt_fd that avoids Rust File objects to prevent fdsan conflicts
 pub fn triple_encrypt_fd_raw(
     secret: &[u8],
@@ -1108,6 +853,7 @@ pub fn triple_encrypt_fd_raw(
     Ok(())
 }
 
+//MARK: triple_decrypt_fd_raw
 /// Raw FD version of triple_decrypt_fd that avoids Rust File objects to prevent fdsan conflicts
 pub fn triple_decrypt_fd_raw(
     secret: &[u8],

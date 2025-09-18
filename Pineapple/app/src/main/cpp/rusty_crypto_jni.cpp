@@ -223,27 +223,27 @@ Java_com_pineapple_app_RustyCrypto_derivePasswordHashUnified128(JNIEnv *env, jcl
 // Core JNI functions - simplified names
 extern "C" JNIEXPORT jbyteArray JNICALL
 Java_com_pineapple_app_RustyCrypto_argon2Hash(JNIEnv *env, jclass clazz, jbyteArray password, jbyteArray salt, jint outputLength) {
-    jsize passwordLen, saltLen;
+    // This function is deprecated - use derivePasswordHashUnified128 instead
+    // For backward compatibility, we'll implement a simple fallback
+    jsize passwordLen;
     uint8_t *passwordBytes = jbyteArrayToBytes(env, password, &passwordLen);
-    uint8_t *saltBytes = jbyteArrayToBytes(env, salt, &saltLen);
     
     if (!passwordBytes) {
-        delete[] passwordBytes;
-        delete[] saltBytes;
         return nullptr;
     }
     
-    // Use default salt if none provided
-    uint8_t defaultSalt[ARGON2_SALT_SIZE] = {0};
-    const uint8_t* saltPtr = (saltBytes && saltLen > 0) ? saltBytes : defaultSalt;
-    size_t saltSize = (saltBytes && saltLen > 0) ? saltLen : ARGON2_SALT_SIZE;
-    
     jsize outLen = outputLength > 0 ? outputLength : 32;
     uint8_t *hashBuf = new uint8_t[outLen];
-    int result = argon2_hash_c(passwordBytes, passwordLen, saltPtr, saltSize, hashBuf, outLen);
+    
+    // Use the unified derivation with empty app name and app password
+    int result = derive_password_hash_unified_128_c(
+        (const unsigned char*)"", 0,  // empty app name
+        (const unsigned char*)"", 0,  // empty app password
+        passwordBytes, passwordLen,    // master password = input password
+        hashBuf, outLen
+    );
     
     delete[] passwordBytes;
-    delete[] saltBytes;
     
     if (result != CRYPTO_SUCCESS) {
         delete[] hashBuf;
@@ -255,177 +255,10 @@ Java_com_pineapple_app_RustyCrypto_argon2Hash(JNIEnv *env, jclass clazz, jbyteAr
     return resultArray;
 }
 
-extern "C" JNIEXPORT jbyteArray JNICALL
-Java_com_pineapple_app_RustyCrypto_tripleEncrypt(JNIEnv *env, jclass clazz, jbyteArray masterKey, jbyteArray plaintext) {
-    jsize masterKeyLen, plaintextLen;
-    uint8_t *masterKeyBytes = jbyteArrayToBytes(env, masterKey, &masterKeyLen);
-    uint8_t *plaintextBytes = jbyteArrayToBytes(env, plaintext, &plaintextLen);
+// Removed tripleDecrypt - use tripleDecryptFd instead
 
-    if (!masterKeyBytes || !plaintextBytes || masterKeyLen != 128) {
-        delete[] masterKeyBytes;
-        delete[] plaintextBytes;
-        return nullptr;
-    }
+// Removed generatePasswordSecure - use generatePasswordUnified instead
 
-    // Calculate proper output size: padded input + IV + tag + safety margin
-    size_t chunk_size = 128;
-    size_t padded_len = ((plaintextLen + chunk_size - 1) / chunk_size) * chunk_size;
-    size_t out_len = padded_len + 32 + 16 + 64; // padded + IV + tag + margin
-    uint8_t *output = new uint8_t[out_len];
-    size_t written = 0;
-
-    int res = triple_encrypt_c(masterKeyBytes, plaintextBytes, plaintextLen, output, &written);
-
-    delete[] masterKeyBytes;
-    delete[] plaintextBytes;
-
-    if (res != CRYPTO_SUCCESS || written == 0) {
-        delete[] output;
-        return nullptr;
-    }
-
-    jbyteArray outArray = bytesToJbyteArray(env, output, (jsize)written);
-    delete[] output;
-    return outArray;
-}
-
-
-extern "C" JNIEXPORT jbyteArray JNICALL
-Java_com_pineapple_app_RustyCrypto_tripleDecrypt(JNIEnv *env, jclass clazz, jbyteArray masterKey, jbyteArray input) {
-    jsize masterKeyLen, inputLen;
-    uint8_t *masterKeyBytes = jbyteArrayToBytes(env, masterKey, &masterKeyLen);
-    uint8_t *inputBytes = jbyteArrayToBytes(env, input, &inputLen);
-
-    if (!masterKeyBytes || !inputBytes || masterKeyLen != 128) {
-        delete[] masterKeyBytes;
-        delete[] inputBytes;
-        return nullptr;
-    }
-
-    // Allocate sufficient buffer for decrypted output (input size should be enough)
-    size_t plaintext_len = inputLen + 128; // Add safety margin
-    uint8_t *plaintext = new uint8_t[plaintext_len];
-    size_t written = 0;
-
-    __android_log_print(ANDROID_LOG_DEBUG, "JNI_DEBUG", "Calling triple_decrypt_c with inputLen: %d", inputLen);
-    __android_log_print(ANDROID_LOG_DEBUG, "JNI_DEBUG", "masterKeyBytes ptr: %p, inputBytes ptr: %p, plaintext ptr: %p", masterKeyBytes, inputBytes, plaintext);
-    int res = triple_decrypt_c(masterKeyBytes, inputBytes, inputLen, plaintext, &written);
-    __android_log_print(ANDROID_LOG_DEBUG, "JNI_DEBUG", "triple_decrypt_c result: %d, written: %zu, inputLen: %d", res, written, inputLen);
-
-    delete[] masterKeyBytes;
-    delete[] inputBytes;
-
-    if (res != CRYPTO_SUCCESS || written == 0) {
-        __android_log_print(ANDROID_LOG_ERROR, "JNI_DEBUG", "Decryption failed - res: %d, written: %zu", res, written);
-        delete[] plaintext;
-        return nullptr;
-    }
-
-    jbyteArray outArray = bytesToJbyteArray(env, plaintext, (jsize)written);
-    delete[] plaintext;
-    return outArray;
-}
-
-extern "C" JNIEXPORT jstring JNICALL
-Java_com_pineapple_app_RustyCrypto_generatePasswordSecure(JNIEnv *env, jclass clazz, jint mode, jbyteArray hashBytes, jint length, jbooleanArray enabledSets, jstring userId) {
-    LOGI("JNI generatePasswordSecure: START - mode=%d, length=%d", mode, length);
-    
-    jsize hashLen = env->GetArrayLength(hashBytes);
-    jsize enabledSetsLen = env->GetArrayLength(enabledSets);
-    
-    LOGI("JNI generatePasswordSecure: hashLen=%d, enabledSetsLen=%d", hashLen, enabledSetsLen);
-    
-    if (enabledSetsLen != 3) {
-        LOGE("JNI generatePasswordSecure: ERROR - enabledSetsLen != 3");
-        return nullptr;
-    }
-    
-    uint8_t *hashBytesPtr = jbyteArrayToBytes(env, hashBytes, &hashLen);
-    jboolean *enabledSetsPtr = env->GetBooleanArrayElements(enabledSets, nullptr);
-    
-    if (!hashBytesPtr || !enabledSetsPtr) {
-        LOGE("JNI generatePasswordSecure: ERROR - null pointers: hash=%p, sets=%p", hashBytesPtr, enabledSetsPtr);
-        if (hashBytesPtr) delete[] hashBytesPtr;
-        if (enabledSetsPtr) env->ReleaseBooleanArrayElements(enabledSets, enabledSetsPtr, JNI_ABORT);
-        return nullptr;
-    }
-    
-    // userId parameter is ignored for backward compatibility
-    if (userId) {
-        const char *userIdStr = env->GetStringUTFChars(userId, nullptr);
-        if (userIdStr) env->ReleaseStringUTFChars(userId, userIdStr);
-    }
-    
-    unsigned char enabledSymbolSets[3];
-    for (int i = 0; i < 3; i++) {
-        enabledSymbolSets[i] = enabledSetsPtr[i] ? 1 : 0;
-    }
-    
-    char passwordOut[257];
-    size_t passwordLenOut = 0;
-    
-    LOGI("JNI generatePasswordSecure: About to call generate_password_c");
-    
-    int result = generate_password_c((unsigned char)mode, hashBytesPtr, hashLen, length,
-                                           enabledSymbolSets, passwordOut, &passwordLenOut);
-    
-    LOGI("JNI generatePasswordSecure: generate_password_c returned %d, passwordLenOut=%zu", result, passwordLenOut);
-    
-    delete[] hashBytesPtr;
-    env->ReleaseBooleanArrayElements(enabledSets, enabledSetsPtr, JNI_ABORT);
-    
-    if (result != CRYPTO_SUCCESS) {
-        LOGE("JNI generatePasswordSecure: ERROR - generate_password_c failed with code %d", result);
-        return nullptr;
-    }
-    
-    LOGI("JNI generatePasswordSecure: SUCCESS - returning password");
-    return env->NewStringUTF(passwordOut);
-}
-
-extern "C" JNIEXPORT jobjectArray JNICALL
-Java_com_pineapple_app_RustyCrypto_kyberKeypair(JNIEnv *env, jclass clazz) {
-    uint8_t publicKey[KYBER_PUBLICKEYBYTES];
-    uint8_t secretKey[KYBER_SECRETKEYBYTES];
-    
-    int result = kyber_keypair_c(publicKey, secretKey);
-    
-    if (result != CRYPTO_SUCCESS) {
-        return nullptr;
-    }
-    
-    jclass byteArrayClass = env->FindClass("[B");
-    if (!byteArrayClass) {
-        return nullptr;
-    }
-    jobjectArray resultArray = env->NewObjectArray(2, byteArrayClass, nullptr);
-    env->SetObjectArrayElement(resultArray, 0, bytesToJbyteArray(env, publicKey, KYBER_PUBLICKEYBYTES));
-    env->SetObjectArrayElement(resultArray, 1, bytesToJbyteArray(env, secretKey, KYBER_SECRETKEYBYTES));
-    
-    return resultArray;
-}
-
-extern "C" JNIEXPORT jobjectArray JNICALL
-Java_com_pineapple_app_RustyCrypto_x448Keypair(JNIEnv *env, jclass clazz) {
-    uint8_t publicKey[X448_KEY_SIZE];
-    uint8_t privateKey[X448_KEY_SIZE];
-    
-    int result = x448_keypair_c(publicKey, privateKey);
-    
-    if (result != CRYPTO_SUCCESS) {
-        return nullptr;
-    }
-    
-    jclass byteArrayClass = env->FindClass("[B");
-    if (!byteArrayClass) {
-        return nullptr;
-    }
-    jobjectArray resultArray = env->NewObjectArray(2, byteArrayClass, nullptr);
-    env->SetObjectArrayElement(resultArray, 0, bytesToJbyteArray(env, publicKey, X448_KEY_SIZE));
-    env->SetObjectArrayElement(resultArray, 1, bytesToJbyteArray(env, privateKey, X448_KEY_SIZE));
-    
-    return resultArray;
-}
 
 // PQC 4-Algorithm Hybrid Key Exchange Functions
 

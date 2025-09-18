@@ -7,7 +7,6 @@ import android.os.Handler // Schedules work on a thread's message queue
 import android.os.Looper // Provides the message loop for a thread
 import android.service.autofill.* // Autofill framework classes (service, requests, responses)
 import android.text.InputType // Input type flags for identifying password fields
-import android.util.Log // Logging utility
 import android.view.View // Base class for UI widgets; used for autofill hints
 import android.view.autofill.AutofillId // Identifier for a field that can be autofilled
 import android.view.autofill.AutofillValue // Value container for autofill data
@@ -26,7 +25,7 @@ class PQryptAutofillService : AutofillService() { // Service that supplies autof
         
         fun setPasswordForAutofill(password: String) { // Store a password for later autofill use
             pendingPassword = password // Save provided password in memory (temporary)
-            Log.d(TAG, "Password set for autofill - Length: ${password.length} characters") // Log sanitized info
+            // Log.d(TAG, "Password set for autofill - Length: ${password.length} characters") // Log sanitized info
             
             // Initialize handler if needed
             if (clearPasswordHandler == null) { // Create handler on main thread if absent
@@ -39,7 +38,7 @@ class PQryptAutofillService : AutofillService() { // Service that supplies autof
             // Start 60-second auto-clear timer
             clearPasswordRunnable = Runnable { // Define action to clear password later
                 clearPendingPassword() // Wipe stored password
-                Log.d(TAG, "Password auto-cleared after 60 seconds") // Audit log for auto-clear
+                // Log.d(TAG, "Password auto-cleared after 60 seconds") // Audit log for auto-clear
             }
             clearPasswordHandler?.postDelayed(clearPasswordRunnable!!, 60000) // Schedule clear after 60s
         }
@@ -52,23 +51,23 @@ class PQryptAutofillService : AutofillService() { // Service that supplies autof
             pendingPassword?.let { password -> // If a password exists
                 val charArray = password.toCharArray() // Copy to mutable char array
                 Arrays.fill(charArray, '\u0000') // Overwrite chars to reduce memory residue
-                Log.d(TAG, "Password memory overwritten - ${charArray.size} characters zeroed") // Log wipe
+                // Log.d(TAG, "Password memory overwritten - ${charArray.size} characters zeroed") // Log wipe
             }
             pendingPassword = null // Remove strong reference to the password
-            Log.d(TAG, "Pending password cleared and nullified") // Confirm cleared state
+            // Log.d(TAG, "Pending password cleared and nullified") // Confirm cleared state
         }
         
         // Debug method to verify if password is available for autofill
         fun isPasswordAvailable(): Boolean { // Return whether a password is currently stored
             val available = pendingPassword != null // True if not null
-            Log.d(TAG, "Password availability check: $available") // Log current availability
+            // Log.d(TAG, "Password availability check: $available") // Log current availability
             return available // Expose status to callers
         }
         
         // Debug method to get password length without exposing the actual password
         fun getPasswordLength(): Int { // Computes the stored password length safely
             val length = pendingPassword?.length ?: 0 // 0 if none
-            Log.d(TAG, "Current password length: $length") // Log the length for diagnostics
+            // Log.d(TAG, "Current password length: $length") // Log the length for diagnostics
             return length // Provide information without revealing content
         }
     }
@@ -78,28 +77,28 @@ class PQryptAutofillService : AutofillService() { // Service that supplies autof
         cancellationSignal: CancellationSignal, // Signal to cancel processing
         callback: FillCallback // Callback to return a response
     ) { // Called by the system to obtain autofill data
-        Log.d(TAG, " onFillRequest called") // Trace entry
+        // Log.d(TAG, " onFillRequest called") // Trace entry
         
         val structure = request.fillContexts.lastOrNull()?.structure // Get latest AssistStructure snapshot
         if (structure == null) { // If no UI structure available
-            Log.w(TAG, " No structure found") // Warn and
+            // Log.w(TAG, " No structure found") // Warn and
             callback.onSuccess(null) // return no datasets
             return // Exit early
         }
 
         if (pendingPassword == null) { // Nothing to autofill if no stored password
-            Log.d(TAG, " No pending password available") // Log and
+            // Log.d(TAG, " No pending password available") // Log and
             callback.onSuccess(null) // return no datasets
             return // Exit
         }
 
-        Log.d(TAG, " Pending password available: ${pendingPassword!!.length} characters") // Password exists; report length
+        // Log.d(TAG, " Pending password available: ${pendingPassword!!.length} characters") // Password exists; report length
         
         val passwordFields = findPasswordFields(structure) // Scan structure to locate password fields
-        Log.d(TAG, " Found ${passwordFields.size} password fields") // Log count
+        // Log.d(TAG, " Found ${passwordFields.size} password fields") // Log count
         
         if (passwordFields.isEmpty()) { // If no suitable targets
-            Log.d(TAG, " No password fields detected") // Inform and
+            // Log.d(TAG, " No password fields detected") // Inform and
             callback.onSuccess(null) // send empty response
             return // Exit
         }
@@ -109,7 +108,7 @@ class PQryptAutofillService : AutofillService() { // Service that supplies autof
             
             // Create dataset for each password field
             passwordFields.forEachIndexed { index, passwordField -> // Iterate over targets
-                Log.d(TAG, " Creating dataset for field $index: $passwordField") // Trace dataset creation
+                // Log.d(TAG, " Creating dataset for field $index: $passwordField") // Trace dataset creation
                 
                 val dataset = Dataset.Builder() // Build a dataset representing a fill option
                     .setValue(
@@ -124,16 +123,16 @@ class PQryptAutofillService : AutofillService() { // Service that supplies autof
 
             val response = responseBuilder.build() // Build the final response
             callback.onSuccess(response) // Send response back to the system
-            Log.d(TAG, " Fill response sent successfully") // Trace success
+            // Log.d(TAG, " Fill response sent successfully") // Trace success
             
         } catch (e: Exception) { // Defensive: catch and report any exceptions
-            Log.e(TAG, " Error creating fill response", e) // Log error with stacktrace
+            // Log.e(TAG, " Error creating fill response", e) // Log error with stacktrace
             callback.onFailure("Failed to create autofill response: ${e.message}") // Notify system of failure
         }
     }
 
     override fun onSaveRequest(request: SaveRequest, callback: SaveCallback) { // Invoked to persist user data (unused)
-        Log.d(TAG, "onSaveRequest called - not implemented for security") // Explicitly not saving credentials
+        // Log.d(TAG, "onSaveRequest called - not implemented for security") // Explicitly not saving credentials
         callback.onSuccess() // Acknowledge the request without action
     }
 
@@ -182,9 +181,9 @@ class PQryptAutofillService : AutofillService() { // Service that supplies autof
         
         if (isPasswordField && node.autofillId != null) { // Ensure we have a targetable field
             passwordFields.add(node.autofillId!!) // Collect the field's autofill ID
-            Log.d(TAG, " Found password field - ID: ${node.autofillId}, ViewID: $viewId, InputType: $inputType") // Log detection
+            // Log.d(TAG, " Found password field - ID: ${node.autofillId}, ViewID: $viewId, InputType: $inputType") // Log detection
         } else if (node.autofillId != null) { // If not a password, still log for debugging
-            Log.d(TAG, " Skipped field - ID: ${node.autofillId}, ViewID: $viewId, InputType: $inputType, Hints: ${autofillHints?.joinToString()}") // Trace skipped node
+            // Log.d(TAG, " Skipped field - ID: ${node.autofillId}, ViewID: $viewId, InputType: $inputType, Hints: ${autofillHints?.joinToString()}") // Trace skipped node
         }
         
         // Recursively check children

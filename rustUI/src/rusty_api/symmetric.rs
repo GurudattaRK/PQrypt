@@ -1,7 +1,7 @@
 // Symmetric cryptography implementations
 
 use argon2::{Argon2, Algorithm, Version, Params};
-use serpent::{Serpent, cipher::{BlockEncrypt, BlockDecrypt, KeyInit}};
+use serpent::{Serpent, cipher::{BlockEncrypt, BlockDecrypt}};
 use serpent::cipher::generic_array::GenericArray;
 
 use super::constants_errors::*;

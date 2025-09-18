@@ -11,12 +11,12 @@ cmake_minimum_required(VERSION 3.22.1)
 # build script scope).
 project("pineapple")
 
-# Set the path to the Rust library (relative to this CMake file in app/src/main/cpp)
-set(RUST_LIB_DIR ${CMAKE_CURRENT_SOURCE_DIR}/rusty_api)
-set(RUST_INCLUDE_DIR ${RUST_LIB_DIR}/include)
+# Set the path to the Rust library (relative to this CMake file in app/src/main)
+set(RUST_LIB_DIR ${CMAKE_CURRENT_SOURCE_DIR}/rust)
+set(CPP_INCLUDE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/cpp)
 
 # Add include directories
-include_directories(${RUST_INCLUDE_DIR})
+include_directories(${CPP_INCLUDE_DIR})
 
 # Determine the Android ABI for Rust target
 if(ANDROID_ABI STREQUAL "arm64-v8a")
@@ -32,7 +32,7 @@ else()
 endif()
 
 # Paths for Rust build outputs
-set(RUST_STATIC_LIB ${RUST_LIB_DIR}/target/${RUST_TARGET}/release/librusty_api.a)
+set(RUST_STATIC_LIB ${RUST_LIB_DIR}/target/${RUST_TARGET}/release/librust.a)
 
 # Ensure Ninja knows what file is produced by cargo using BYPRODUCTS/OUTPUT
 # Derive Android API level safely for toolchain triple
@@ -74,7 +74,7 @@ add_custom_target(rust_build ALL
 # Create the JNI bridge library
 # Build JNI bridge from existing working version
 add_library(rusty_crypto_jni SHARED
-    rusty_crypto_jni.cpp
+    cpp/rusty_crypto_jni.cpp
 )
 
 # Make sure Rust library is built before JNI bridge

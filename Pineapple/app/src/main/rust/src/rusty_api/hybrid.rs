@@ -4,7 +4,6 @@ use super::utils::{encrypt_key_with_shared_secret, decrypt_key_with_shared_secre
 use super::symmetric::argon2id_hash;
 use zeroize::Zeroize;
 use serde::{Serialize, Deserialize};
-use serde_arrays::*;
 
 // HYBRID KEY EXCHANGE TYPE DEFINITIONS
 

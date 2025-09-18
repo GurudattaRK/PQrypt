@@ -10,15 +10,14 @@ use pqcrypto_hqc::hqc256::{
     PublicKey as HqcPublicKey, SecretKey as HqcSecretKey, Ciphertext as HqcCiphertext
 };
 
-use p521::{PublicKey as P521Public, SecretKey as P521Secret, NistP521};
-use elliptic_curve::{ecdh::diffie_hellman, sec1::ToEncodedPoint, FieldBytes};
+use p521::{PublicKey as P521Public, SecretKey as P521Secret};
+use elliptic_curve::sec1::ToEncodedPoint;
 
 // SLH-DSA (SPHINCS+) FIPS-205 implementation
 use fips205::slh_dsa_shake_256f;
 use fips205::traits::{SerDes, Signer, Verifier};
 
 use super::constants_errors::*;
-use super::utils::secure_random_bytes;
 
 //MARK: Kyber1024 operations with proper error handling
 pub fn crypto_kyber1024_keypair() -> Result<
