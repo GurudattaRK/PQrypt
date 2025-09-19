@@ -1,0 +1,264 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:fillViewport="true"
+    tools:context=".SecureShareManualTextActivity">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="24dp">
+
+        <!-- Header -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:layout_marginBottom="24dp">
+
+            <Button
+                android:id="@+id/btn_back"
+                style="@style/Widget.Material3.Button"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:backgroundTint="#9C27B0"
+                android:text="← Back"
+                android:textColor="@android:color/white"
+                android:textSize="14sp" />
+
+            <View
+                android:layout_width="0dp"
+                android:layout_height="1dp"
+                android:layout_weight="1" />
+
+            <Button
+                android:id="@+id/btn_help"
+                style="@style/Widget.Material3.Button"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:backgroundTint="#FF9800"
+                android:text="Help?"
+                android:textColor="@android:color/white"
+                android:textSize="14sp" />
+        </LinearLayout>
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Secure Text Share - Manual"
+            android:textSize="24sp"
+            android:textStyle="bold"
+            android:layout_marginBottom="16dp"
+            android:layout_gravity="center_horizontal" />
+
+        <TextView
+            android:id="@+id/tv_role"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Role: Sender"
+            android:textSize="16sp"
+            android:textStyle="bold"
+            android:layout_marginBottom="16dp"
+            android:layout_gravity="center_horizontal" />
+
+        <TextView
+            android:id="@+id/tv_status"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Enter text to share, then start the key exchange process"
+            android:textSize="14sp"
+            android:textColor="#0066cc"
+            android:layout_marginBottom="16dp"
+            android:gravity="center" />
+
+        <!-- Text Input (Sender only) -->
+        <LinearLayout
+            android:id="@+id/ll_text_input"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:layout_marginBottom="16dp"
+            android:visibility="visible">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Text to Share:"
+                android:textSize="16sp"
+                android:textStyle="bold"
+                android:layout_marginBottom="8dp" />
+
+            <EditText
+                android:id="@+id/et_text_input"
+                android:layout_width="match_parent"
+                android:layout_height="120dp"
+                android:hint="Enter your text message here..."
+                android:gravity="top|start"
+                android:inputType="textMultiLine"
+                android:padding="12dp"
+                android:background="@drawable/edittext_border"
+                android:layout_marginBottom="8dp" />
+
+            <TextView
+                android:id="@+id/tv_char_count"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="0 characters"
+                android:textSize="12sp"
+                android:textColor="#666666"
+                android:gravity="end"
+                android:layout_marginBottom="16dp" />
+        </LinearLayout>
+
+        <!-- Text Display (Receiver only) -->
+        <LinearLayout
+            android:id="@+id/ll_text_display"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:layout_marginBottom="16dp"
+            android:visibility="gone">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Decrypted Text:"
+                android:textSize="16sp"
+                android:textStyle="bold"
+                android:layout_marginBottom="8dp" />
+
+            <TextView
+                android:id="@+id/tv_decrypted_text"
+                android:layout_width="match_parent"
+                android:layout_height="120dp"
+                android:text="Decrypted text will appear here after successful key exchange"
+                android:textSize="14sp"
+                android:padding="12dp"
+                android:background="@drawable/edittext_border"
+                android:layout_marginBottom="16dp" />
+        </LinearLayout>
+
+        <!-- Step 1: Generate initial key -->
+        <Button
+            android:id="@+id/btn_step1"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Step 1: Start Key Exchange"
+            android:textSize="16sp"
+            android:padding="12dp"
+            android:layout_marginBottom="8dp"
+            style="@style/Widget.Material3.Button"
+            android:backgroundTint="#00AF00"
+            android:textColor="@android:color/white" />
+
+        <TextView
+            android:id="@+id/tv_step1_result"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text=""
+            android:textSize="12sp"
+            android:textColor="#666666"
+            android:layout_marginBottom="16dp"
+            android:visibility="gone" />
+
+        <!-- Step 2: Open other party's key and auto-generate response -->
+        <Button
+            android:id="@+id/btn_step2"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Step 2: Open Key File &amp; Auto-Generate Response"
+            android:textSize="16sp"
+            android:padding="12dp"
+            android:layout_marginBottom="8dp"
+            android:enabled="false"
+            style="@style/Widget.Material3.Button"
+            android:backgroundTint="#2196F3"
+            android:textColor="@android:color/white" />
+
+        <TextView
+            android:id="@+id/tv_step2_result"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text=""
+            android:textSize="12sp"
+            android:textColor="#666666"
+            android:layout_marginBottom="16dp"
+            android:visibility="gone" />
+
+        <!-- Step 3: Final key or text operation -->
+        <Button
+            android:id="@+id/btn_step3"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Step 3: Generate Final Key"
+            android:textSize="16sp"
+            android:padding="12dp"
+            android:layout_marginBottom="8dp"
+            android:enabled="false"
+            style="@style/Widget.Material3.Button"
+            android:backgroundTint="#FF5722"
+            android:textColor="@android:color/white" />
+
+        <TextView
+            android:id="@+id/tv_step3_result"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text=""
+            android:textSize="12sp"
+            android:textColor="#666666"
+            android:layout_marginBottom="16dp"
+            android:visibility="gone" />
+
+        <!-- Step 4: Text encryption/decryption -->
+        <Button
+            android:id="@+id/btn_step4"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Step 4: Choose Encrypted Text File"
+            android:textSize="16sp"
+            android:padding="12dp"
+            android:layout_marginBottom="8dp"
+            android:enabled="false"
+            style="@style/Widget.Material3.Button"
+            android:backgroundTint="#9C27B0"
+            android:textColor="@android:color/white" />
+
+        <TextView
+            android:id="@+id/tv_step4_result"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text=""
+            android:textSize="12sp"
+            android:textColor="#666666"
+            android:layout_marginBottom="16dp"
+            android:visibility="gone" />
+
+        <!-- Output folder selection -->
+        <Button
+            android:id="@+id/btn_choose_output_folder"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Choose Output Folder"
+            android:textSize="16sp"
+            android:padding="12dp"
+            android:layout_marginBottom="8dp"
+            style="@style/Widget.Material3.Button"
+            android:backgroundTint="#607D8B"
+            android:textColor="@android:color/white" />
+
+        <TextView
+            android:id="@+id/tv_output_folder"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="No output folder selected"
+            android:textSize="12sp"
+            android:textColor="#666666" />
+
+    </LinearLayout>
+</ScrollView>

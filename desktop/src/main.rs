@@ -3,8 +3,10 @@ use rfd::FileDialog;
 use std::path::Path;
 use std::fs;
 use std::time::Instant;
+use std::rc::Rc;
 
 use pqrypt::rusty_api;
+use pqrypt::secure_share;
 // Import your Slint UI
 slint::include_modules!();
 
@@ -28,11 +30,12 @@ impl PqcState {
     }
 }
 
-// Helper function to hash password/key file data to 128 bytes (Android-compatible: saltless, mobile params)
-fn hash_password_or_keyfile(data: &[u8]) -> Result<[u8; 128], rusty_api::CryptoError> {
+
+// Helper function to hash password/key file data to 256 bytes (Android-compatible: saltless, mobile params)
+fn hash_password_or_keyfile(data: &[u8]) -> Result<[u8; 256], rusty_api::CryptoError> {
     let empty_salt: [u8; 0] = [];
-    let hash_vec = pqrypt::rusty_api::api::argon2_hash_mobile_compat(data, &empty_salt, 128)?;
-    let mut result = [0u8; 128];
+    let hash_vec = pqrypt::rusty_api::api::argon2_hash_mobile_compat(data, &empty_salt, 256)?;
+    let mut result = [0u8; 256];
     result.copy_from_slice(&hash_vec);
     Ok(result)
 }
@@ -315,6 +318,7 @@ fn main() -> Result<(), slint::PlatformError> {
     // Generate key file callback
     let ui_weak = ui_handle.clone();
     let pqc_state_ref = std::cell::RefCell::new(PqcState::new());
+    let secure_share_state_ref = Rc::new(std::cell::RefCell::new(secure_share::SecureShareState::new()));
     ui.on_generate_key_file(move || {
         let ui = ui_weak.unwrap();
         let is_sender = ui.get_sender();
@@ -489,6 +493,232 @@ fn main() -> Result<(), slint::PlatformError> {
         } else {
             println!("Failed to generate password");
             ui.set_generated_password("Failed to generate password".into());
+        }
+    });
+    
+    // Secure Share Callbacks
+    
+    // Secure Share Choose File callback
+    let ui_weak = ui_handle.clone();
+    let secure_share_state_ref_choose = secure_share_state_ref.clone();
+    ui.on_secure_share_choose_file(move || {
+        let ui = ui_weak.unwrap();
+        let secure_share_state = secure_share_state_ref_choose.borrow();
+        
+        if let Some(path) = FileDialog::new().pick_file() {
+            let full_path = path.canonicalize().unwrap_or(path);
+            let file_path = full_path.to_string_lossy().to_string();
+            ui.set_file_path(file_path.clone().into());
+            
+            // If receiver and file is selected, auto-decrypt
+            if !secure_share_state.is_sender && secure_share_state.pqc_state.step == 2 {
+                let mode = secure_share_state.mode.clone();
+                let key_dir = secure_share_state.key_output_dir.clone();
+                drop(secure_share_state); // Release borrow before calling decrypt
+                
+                let result = secure_share::decrypt_file_with_key_dir(&file_path, &mode, &key_dir);
+                
+                ui.set_secure_share_status(result.message.into());
+                if result.success {
+                    if mode == "text" {
+                        if let Some(text_content) = result.file_path {
+                            ui.set_received_text(text_content.into());
+                        }
+                    } else {
+                        if let Some(path) = result.file_path {
+                            ui.set_output_file_path(path.into());
+                        }
+                    }
+                }
+            }
+        }
+    });
+    
+    // Secure Share Start Sender callback
+    let ui_weak = ui_handle.clone();
+    let secure_share_state_ref_clone = secure_share_state_ref.clone();
+    ui.on_secure_share_start_sender(move || {
+        let ui = ui_weak.unwrap();
+        let mut secure_share_state = secure_share_state_ref_clone.borrow_mut();
+        
+        // Reset state to ensure clean start
+        secure_share_state.reset();
+        
+        let mode = ui.get_secure_share_mode().to_string();
+        secure_share_state.set_mode(&mode);
+        
+        let text_content = if mode == "text" {
+            let text = ui.get_secure_share_text().to_string();
+            if text.is_empty() { None } else { Some(text) }
+        } else {
+            None
+        };
+        
+        let file_path = if mode == "file" {
+            let path = ui.get_file_path().to_string();
+            if path.is_empty() { None } else { Some(path) }
+        } else {
+            None
+        };
+        
+        let result = secure_share::start_sender(&mut *secure_share_state, text_content.as_deref(), file_path.as_deref());
+        
+        ui.set_secure_share_status(result.message.into());
+        if let Some(path) = result.file_path {
+            ui.set_generated_key_path(path.into());
+        }
+        if result.success && mode == "text" {
+            if let Some(temp_path) = &secure_share_state.temp_text_file {
+                ui.set_file_path(temp_path.clone().into());
+            }
+        }
+    });
+    
+    // Secure Share Start Receiver callback
+    let ui_weak = ui_handle.clone();
+    let secure_share_state_ref_clone2 = secure_share_state_ref.clone();
+    ui.on_secure_share_start_receiver(move || {
+        let ui = ui_weak.unwrap();
+        let mut secure_share_state = secure_share_state_ref_clone2.borrow_mut();
+        
+        // Reset state to ensure clean start
+        secure_share_state.reset();
+        
+        let mode = ui.get_secure_share_mode().to_string();
+        let result = secure_share::start_receiver(&mut *secure_share_state, &mode);
+        
+        ui.set_secure_share_status(result.message.into());
+    });
+    
+    // Secure Share Open Key callback
+    let ui_weak = ui_handle.clone();
+    let secure_share_state_ref_clone3 = secure_share_state_ref.clone();
+    ui.on_secure_share_open_key(move || {
+        let ui = ui_weak.unwrap();
+        let mut secure_share_state = secure_share_state_ref_clone3.borrow_mut();
+        
+        if let Some(path) = FileDialog::new().pick_file() {
+            let full_path = path.canonicalize().unwrap_or(path);
+            let key_file_path = full_path.to_string_lossy().to_string();
+            ui.set_key_file_path(key_file_path.clone().into());
+            
+            if secure_share_state.is_sender {
+                // For sender, auto-generate 3.key when opening 2.key and auto-encrypt file
+                let file_to_encrypt = if secure_share_state.mode == "file" {
+                    let file_path = ui.get_file_path().to_string();
+                    if file_path.is_empty() { None } else { Some(file_path) }
+                } else {
+                    None
+                };
+                
+                let result = secure_share::generate_key_with_file_path(&mut *secure_share_state, &key_file_path, file_to_encrypt.as_deref());
+                ui.set_secure_share_status(result.message.into());
+                if let Some(path) = result.file_path {
+                    ui.set_generated_key_path(path.into());
+                }
+            } else {
+                // For receiver, automatically generate key based on current pqc_state step
+                if secure_share_state.pqc_state.step == 0 {
+                    // Opening 1.key - auto-generate 2.key
+                    let result = secure_share::generate_key_with_file_path(&mut *secure_share_state, &key_file_path, None);
+                    ui.set_secure_share_status(result.message.into());
+                    if let Some(path) = result.file_path {
+                        ui.set_generated_key_path(path.into());
+                    }
+                } else if secure_share_state.pqc_state.step == 1 {
+                    // Opening 3.key - automatically generate final.key and auto-decrypt
+                    let mode = secure_share_state.mode.clone();
+                    let result = secure_share::generate_key_with_file_path(&mut *secure_share_state, &key_file_path, None);
+                    ui.set_secure_share_status(result.message.into());
+                    if let Some(path) = result.file_path {
+                        if mode == "text" {
+                            // For text mode, the result.file_path contains the actual text content
+                            ui.set_received_text(path.into());
+                        } else {
+                            // For file mode, it contains the output file path
+                            ui.set_output_file_path(path.into());
+                        }
+                    }
+                } else {
+                    ui.set_secure_share_status("Opened key file.".into());
+                }
+            }
+        }
+    });
+    
+    // Secure Share Generate Key callback - DEPRECATED, auto-generation happens in open_key
+    let ui_weak = ui_handle.clone();
+    let secure_share_state_ref_clone4 = secure_share_state_ref.clone();
+    ui.on_secure_share_generate_key(move || {
+        let ui = ui_weak.unwrap();
+        let mut secure_share_state = secure_share_state_ref_clone4.borrow_mut();
+        let key_file_path = ui.get_key_file_path().to_string();
+        
+        let file_path = if secure_share_state.is_sender && secure_share_state.mode == "file" {
+            Some(ui.get_file_path().to_string())
+        } else {
+            None
+        };
+        let result = secure_share::generate_key_with_file_path(&mut *secure_share_state, &key_file_path, file_path.as_deref());
+        
+        ui.set_secure_share_status(result.message.into());
+        if let Some(path) = result.file_path {
+            ui.set_generated_key_path(path.into());
+        }
+        
+        // Encryption is now handled automatically in secure_share.rs
+    });
+    
+    // Secure Share Encrypt callback
+    let ui_weak = ui_handle.clone();
+    ui.on_secure_share_encrypt(move || {
+        let ui = ui_weak.unwrap();
+        let file_path = ui.get_file_path().to_string();
+        
+        let result = secure_share::encrypt_file(&file_path);
+        
+        ui.set_secure_share_status(result.message.into());
+        if let Some(path) = result.file_path {
+            ui.set_output_file_path(path.into());
+        }
+    });
+    
+    // Secure Share Decrypt callback
+    let ui_weak = ui_handle.clone();
+    let secure_share_state_ref_clone6 = secure_share_state_ref.clone();
+    ui.on_secure_share_decrypt(move || {
+        let ui = ui_weak.unwrap();
+        let secure_share_state = secure_share_state_ref_clone6.borrow();
+        let file_path = ui.get_file_path().to_string();
+        
+        let result = secure_share::decrypt_file(&file_path, &secure_share_state.mode);
+        
+        ui.set_secure_share_status(result.message.into());
+        if result.success {
+            if secure_share_state.mode == "text" {
+                if let Some(text_content) = result.file_path {
+                    ui.set_received_text(text_content.into());
+                }
+            } else {
+                if let Some(path) = result.file_path {
+                    ui.set_output_file_path(path.into());
+                }
+            }
+        }
+    });
+    
+    // Secure Share Choose Key Folder callback
+    let ui_weak = ui_handle.clone();
+    let secure_share_state_ref_clone7 = secure_share_state_ref.clone();
+    ui.on_secure_share_choose_key_folder(move || {
+        let ui = ui_weak.unwrap();
+        let mut secure_share_state = secure_share_state_ref_clone7.borrow_mut();
+        
+        if let Some(folder) = FileDialog::new().pick_folder() {
+            let folder_path = folder.canonicalize().unwrap_or(folder);
+            let folder_str = folder_path.to_string_lossy().to_string();
+            secure_share_state.set_key_output_dir(&folder_str);
+            ui.set_secure_share_status(format!("Key files location set to: {}", folder_str).into());
         }
     });
     

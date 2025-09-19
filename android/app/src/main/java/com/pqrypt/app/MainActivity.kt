@@ -30,6 +30,10 @@ class MainActivity : AppCompatActivity() {
             startActivity(Intent(this, KeyExchangeModeActivity::class.java))
         }
 
+        binding.btnSecureShare.setOnClickListener {
+            startActivity(Intent(this, SecureShareModeActivity::class.java))
+        }
+
         binding.btnPasswordVault.setOnClickListener {
             startActivity(Intent(this, PasswordVaultActivity::class.java))
         }

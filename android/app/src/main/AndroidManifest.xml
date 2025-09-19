@@ -89,6 +89,26 @@
             android:name=".HelpActivity"
             android:exported="false" />
 
+        <activity
+            android:name=".SecureShareModeActivity"
+            android:exported="false" />
+
+        <activity
+            android:name=".SecureShareManualFileActivity"
+            android:exported="false" />
+
+        <activity
+            android:name=".SecureShareBluetoothFileActivity"
+            android:exported="false" />
+
+        <activity
+            android:name=".SecureShareManualTextActivity"
+            android:exported="false" />
+
+        <activity
+            android:name=".SecureShareBluetoothTextActivity"
+            android:exported="false" />
+
             
     </application> 
 

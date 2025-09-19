@@ -396,11 +396,12 @@ pub fn encrypt_file_pqrypt2(
         if process_len > 0 {
             // Triple encrypt in-place per 128B block
             let mut process_vec = process_slice.to_vec();
-            let mut threefish_chain = keys.threefish_iv;
-            let mut serpent_chain = keys.serpent_iv;
             
             for chunk in process_vec.chunks_mut(CHUNK_SIZE) {
                 let chunk_array: &mut [u8; CHUNK_SIZE] = chunk.try_into().map_err(|_| CryptoError::InvalidInput)?;
+                // Reset chaining state for every chunk (match Android behavior)
+                let mut threefish_chain = keys.threefish_iv;
+                let mut serpent_chain = keys.serpent_iv;
                 triple_encrypt_chunk_inplace(chunk_array, &keys, &mut threefish_chain, &mut serpent_chain)?;
             }
 
@@ -524,8 +525,6 @@ pub fn decrypt_file_pqrypt2(
 
     // Process ciphertext in chunks
     let mut all_plaintext = Vec::with_capacity(ciphertext.len());
-    let mut threefish_chain = keys.threefish_iv;
-    let mut serpent_chain = keys.serpent_iv;
     
     // GHASH all ciphertext
     ghash_update_blocks(&mut ghash, ciphertext);
@@ -542,6 +541,9 @@ pub fn decrypt_file_pqrypt2(
         
         // CTR decrypt
         ctr.apply_keystream(chunk_array);
+        // Reset chaining state for every chunk (match Android behavior)
+        let mut threefish_chain = keys.threefish_iv;
+        let mut serpent_chain = keys.serpent_iv;
         // Reverse triple
         triple_decrypt_chunk_inplace(chunk_array, &keys, &mut threefish_chain, &mut serpent_chain)?;
         
@@ -557,6 +559,9 @@ pub fn decrypt_file_pqrypt2(
         
         // CTR decrypt
         ctr.apply_keystream(&mut last_block);
+        // Reset chaining state for final block (match encryption behavior)
+        let mut threefish_chain = keys.threefish_iv;
+        let mut serpent_chain = keys.serpent_iv;
         // Reverse triple
         triple_decrypt_chunk_inplace(&mut last_block, &keys, &mut threefish_chain, &mut serpent_chain)?;
         
