@@ -103,6 +103,8 @@
                 android:inputType="textMultiLine"
                 android:padding="12dp"
                 android:background="@drawable/edittext_border"
+                android:textColor="@android:color/black"
+                android:textColorHint="#999999"
                 android:layout_marginBottom="8dp" />
 
             <TextView
@@ -139,6 +141,7 @@
                 android:layout_height="120dp"
                 android:text="Decrypted text will appear here after successful transfer"
                 android:textSize="14sp"
+                android:textColor="@android:color/black"
                 android:padding="12dp"
                 android:background="@drawable/edittext_border"
                 android:layout_marginBottom="16dp" />

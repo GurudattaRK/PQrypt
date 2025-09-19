@@ -286,56 +286,6 @@ class SecureShareManualFileActivity : AppCompatActivity() {
         }
     }
 
-    private fun performFileEncryption() {
-        if (selectedFileUri == null || finalSharedSecret == null) {
-            showError("Missing file or encryption key")
-            return
-        }
-
-        lifecycleScope.launch(Dispatchers.IO) {
-            try {
-                val inputPath = getRealPathFromUri(selectedFileUri!!)
-                if (inputPath == null) {
-                    withContext(Dispatchers.Main) {
-                        showError("Cannot access selected file")
-                    }
-                    return@launch
-                }
-
-                val outputPath = "${inputPath}.secure_share.pqrypt2"
-                
-                // Open file descriptors for real encryption
-                val inputFd = ParcelFileDescriptor.open(File(inputPath), ParcelFileDescriptor.MODE_READ_ONLY)
-                val outputFd = ParcelFileDescriptor.open(File(outputPath), ParcelFileDescriptor.MODE_CREATE or ParcelFileDescriptor.MODE_WRITE_ONLY)
-                
-                val success = try {
-                    // Use real triple encryption with the shared secret
-                    RustyCrypto.tripleEncryptFd(finalSharedSecret!!, false, inputFd.fd, outputFd.fd)
-                } catch (e: Exception) {
-                    -1 // failure
-                } finally {
-                    inputFd.close()
-                    outputFd.close()
-                }
-
-                withContext(Dispatchers.Main) {
-                    if (success == 0) {
-                        lastOutputPath = outputPath
-                        binding.tvStep4Result.text = "File encrypted: ${File(outputPath).name}\nLocation: $outputPath"
-                        binding.tvStep4Result.visibility = View.VISIBLE
-                        showSuccess("File encrypted successfully! Share the encrypted file.")
-                    } else {
-                        showError("File encryption failed")
-                    }
-                }
-            } catch (e: Exception) {
-                withContext(Dispatchers.Main) {
-                    showError("Encryption error: ${e.message}")
-                }
-            }
-        }
-    }
-
     private fun handleEncryptedFileSelection(uri: Uri) {
         if (finalSharedSecret == null) {
             showError("Final key not generated yet")
@@ -360,15 +310,19 @@ class SecureShareManualFileActivity : AppCompatActivity() {
                 } else {
                     "${fileName}.decrypted"
                 }
-
-                val outputPath = "${File(inputPath).parent}/${outputName}"
                 
-                // Open file descriptors for real decryption
+                // Use default output directory or app's files directory
+                val outputDir = File(getExternalFilesDir(null), "Pqcrypt")
+                if (!outputDir.exists()) {
+                    outputDir.mkdirs()
+                }
+                val outputPath = File(outputDir, outputName).absolutePath
+
+                // Open file descriptors for decryption
                 val inputFd = ParcelFileDescriptor.open(File(inputPath), ParcelFileDescriptor.MODE_READ_ONLY)
                 val outputFd = ParcelFileDescriptor.open(File(outputPath), ParcelFileDescriptor.MODE_CREATE or ParcelFileDescriptor.MODE_WRITE_ONLY)
-                
+
                 val success = try {
-                    // Use real triple decryption with the shared secret
                     RustyCrypto.tripleDecryptFd(finalSharedSecret!!, false, inputFd.fd, outputFd.fd)
                 } catch (e: Exception) {
                     -1 // failure
@@ -382,7 +336,7 @@ class SecureShareManualFileActivity : AppCompatActivity() {
                         lastOutputPath = outputPath
                         binding.tvStep4Result.text = "File decrypted: ${File(outputPath).name}\nLocation: $outputPath"
                         binding.tvStep4Result.visibility = View.VISIBLE
-                        showSuccess("File decrypted successfully!")
+                        showSuccess("File decrypted to: $outputPath")
                     } else {
                         showError("File decryption failed")
                     }
@@ -390,6 +344,58 @@ class SecureShareManualFileActivity : AppCompatActivity() {
             } catch (e: Exception) {
                 withContext(Dispatchers.Main) {
                     showError("Decryption error: ${e.message}")
+                }
+            }
+        }
+    }
+
+    private fun performFileEncryption() {
+        if (selectedFileUri == null || finalSharedSecret == null) {
+            showError("Missing file or encryption key")
+            return
+        }
+
+        lifecycleScope.launch(Dispatchers.IO) {
+            try {
+                val inputPath = getRealPathFromUri(selectedFileUri!!)
+                if (inputPath == null) {
+                    withContext(Dispatchers.Main) {
+                        showError("Cannot access selected file")
+                    }
+                    return@launch
+                }
+
+                // Use same directory as the selected file for encryption
+            val originalFile = File(inputPath)
+            val outputPath = File(originalFile.parent, "${originalFile.name}.secure_share.pqrypt2").absolutePath
+                
+                // Open file descriptors for real encryption
+                val inputFd = ParcelFileDescriptor.open(File(inputPath), ParcelFileDescriptor.MODE_READ_ONLY)
+                val outputFd = ParcelFileDescriptor.open(File(outputPath), ParcelFileDescriptor.MODE_CREATE or ParcelFileDescriptor.MODE_WRITE_ONLY)
+                
+                val success = try {
+                    // Use real triple encryption with the shared secret
+                    RustyCrypto.tripleEncryptFd(finalSharedSecret!!, false, inputFd.fd, outputFd.fd)
+                } catch (e: Exception) {
+                    -1 // failure
+                } finally {
+                    inputFd.close()
+                    outputFd.close()
+                }
+
+                withContext(Dispatchers.Main) {
+                    if (success == 0) {
+                        lastOutputPath = outputPath
+                        binding.tvStep4Result.text = "File encrypted: ${File(outputPath).name}\nLocation: $outputPath"
+                        binding.tvStep4Result.visibility = View.VISIBLE
+                        showSuccess("File encrypted to: $outputPath")
+                    } else {
+                        showError("File encryption failed")
+                    }
+                }
+            } catch (e: Exception) {
+                withContext(Dispatchers.Main) {
+                    showError("Encryption error: ${e.message}")
                 }
             }
         }
@@ -425,8 +431,20 @@ class SecureShareManualFileActivity : AppCompatActivity() {
     }
 
     private fun saveKeyFile(keyData: ByteArray, fileName: String) {
-        // Implementation to save key file using SAF
-        // This would use the picked folder or default downloads folder
+        try {
+            // Use default output directory
+            val outputDir = File(getExternalFilesDir(null), "Pqcrypt")
+            if (!outputDir.exists()) {
+                outputDir.mkdirs()
+            }
+            
+            val keyFile = File(outputDir, fileName)
+            keyFile.writeBytes(keyData)
+            
+            showSuccess("Key saved to: ${keyFile.absolutePath}")
+        } catch (e: Exception) {
+            showError("Failed to save key file: ${e.message}")
+        }
     }
 
     private fun readFileBytes(uri: Uri): ByteArray? {
@@ -447,9 +465,22 @@ class SecureShareManualFileActivity : AppCompatActivity() {
     }
 
     private fun getRealPathFromUri(uri: Uri): String? {
-        // Implementation to get real file path from URI
-        // This may require copying to cache for some URIs
-        return null // Placeholder
+        return try {
+            // For content URIs, copy to cache directory
+            if (uri.scheme == "content") {
+                val tempFile = File.createTempFile("manual_", ".tmp", cacheDir)
+                contentResolver.openInputStream(uri)?.use { input ->
+                    tempFile.outputStream().use { output ->
+                        input.copyTo(output)
+                    }
+                }
+                tempFile.absolutePath
+            } else {
+                uri.path
+            }
+        } catch (e: Exception) {
+            null
+        }
     }
 
     private fun getDisplayPath(uri: Uri): String {

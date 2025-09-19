@@ -16,6 +16,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import android.os.ParcelFileDescriptor
+import android.os.Environment
 import java.io.File
 import java.io.FileWriter
 
@@ -32,6 +33,7 @@ class SecureShareManualTextActivity : AppCompatActivity() {
     private var selectedFileUri: Uri? = null
     private var selectedFilePath = ""
     private var pickedFolderUri: Uri? = null
+    private var defaultOutputDir: File? = null
     private var finalSharedSecret: ByteArray? = null
     private var tempTextFile: File? = null
     private var lastOutputPath: String? = null
@@ -91,7 +93,32 @@ class SecureShareManualTextActivity : AppCompatActivity() {
         isSender = role == "sender"
 
         setupUI()
+        setupDefaultOutputLocation()
         updateUI()
+    }
+    
+    private fun setupDefaultOutputLocation() {
+        try {
+            // Create default output directory: Documents/Pqcrypt/
+            val documentsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS)
+            defaultOutputDir = File(documentsDir, "Pqcrypt")
+            
+            if (!defaultOutputDir!!.exists()) {
+                defaultOutputDir!!.mkdirs()
+            }
+            
+            // Update UI to show default location
+            if (pickedFolderUri == null) {
+                binding.tvOutputFolder.text = "Default output: ${defaultOutputDir!!.absolutePath}"
+            }
+        } catch (e: Exception) {
+            // Fallback to app's external files directory
+            defaultOutputDir = File(getExternalFilesDir(null), "Pqcrypt")
+            if (!defaultOutputDir!!.exists()) {
+                defaultOutputDir!!.mkdirs()
+            }
+            binding.tvOutputFolder.text = "Default output: ${defaultOutputDir!!.absolutePath}"
+        }
     }
 
     private fun setupUI() {
@@ -121,6 +148,11 @@ class SecureShareManualTextActivity : AppCompatActivity() {
         // Output folder selection
         binding.btnChooseOutputFolder.setOnClickListener {
             openFolderPicker()
+        }
+        
+        // Make output folder selection optional for receiver
+        if (!isSender) {
+            binding.btnChooseOutputFolder.text = "Choose Custom Output Folder (Optional)"
         }
 
         // Step buttons
@@ -336,7 +368,12 @@ class SecureShareManualTextActivity : AppCompatActivity() {
                 createTempTextFile()
                 
                 val inputPath = tempTextFile!!.absolutePath
-                val outputPath = "${inputPath}.secure_share.pqrypt2"
+                val outputDir = defaultOutputDir ?: File(cacheDir, "secure_share")
+                if (!outputDir.exists()) {
+                    outputDir.mkdirs()
+                }
+                val outputFile = File(outputDir, "${File(inputPath).nameWithoutExtension}.secure_share.pqrypt2")
+                val outputPath = outputFile.absolutePath
                 
                 // Open file descriptors for real encryption
                 val inputFd = ParcelFileDescriptor.open(File(inputPath), ParcelFileDescriptor.MODE_READ_ONLY)
@@ -357,7 +394,7 @@ class SecureShareManualTextActivity : AppCompatActivity() {
                         lastOutputPath = outputPath
                         binding.tvStep4Result.text = "Text encrypted: ${File(outputPath).name}\nLocation: $outputPath"
                         binding.tvStep4Result.visibility = View.VISIBLE
-                        showSuccess("Text encrypted successfully! Share the encrypted file.")
+                        showOutputLocation("Text encrypted successfully! Share the encrypted file.", outputPath)
                     } else {
                         showError("Text encryption failed")
                     }
@@ -395,7 +432,11 @@ class SecureShareManualTextActivity : AppCompatActivity() {
                     "${fileName}.decrypted"
                 }
 
-                val outputPath = "${File(inputPath).parent}/${outputName}"
+                val outputDir = defaultOutputDir ?: File(cacheDir, "secure_share")
+                if (!outputDir.exists()) {
+                    outputDir.mkdirs()
+                }
+                val outputPath = File(outputDir, outputName).absolutePath
                 
                 // Open file descriptors for real decryption
                 val inputFd = ParcelFileDescriptor.open(File(inputPath), ParcelFileDescriptor.MODE_READ_ONLY)
@@ -419,7 +460,7 @@ class SecureShareManualTextActivity : AppCompatActivity() {
                         lastOutputPath = outputPath
                         binding.tvStep4Result.text = "Text decrypted successfully\nLocation: $outputPath"
                         binding.tvStep4Result.visibility = View.VISIBLE
-                        showSuccess("Text decrypted and displayed!")
+                        showOutputLocation("Text decrypted and displayed!", outputPath)
                     } else {
                         showError("Text decryption failed")
                     }
@@ -465,8 +506,20 @@ class SecureShareManualTextActivity : AppCompatActivity() {
     }
 
     private fun saveKeyFile(keyData: ByteArray, fileName: String) {
-        // Implementation to save key file using SAF
-        // This would use the picked folder or default downloads folder
+        try {
+            val outputDir = defaultOutputDir ?: File(cacheDir, "keys")
+            if (!outputDir.exists()) {
+                outputDir.mkdirs()
+            }
+            
+            val keyFile = File(outputDir, fileName)
+            keyFile.writeBytes(keyData)
+            
+            lastOutputPath = keyFile.absolutePath
+            showOutputLocation("Key file saved: ${keyFile.name}", keyFile.absolutePath)
+        } catch (e: Exception) {
+            showError("Failed to save key file: ${e.message}")
+        }
     }
 
     private fun readFileBytes(uri: Uri): ByteArray? {
@@ -478,9 +531,22 @@ class SecureShareManualTextActivity : AppCompatActivity() {
     }
 
     private fun getRealPathFromUri(uri: Uri): String? {
-        // Implementation to get real file path from URI
-        // This may require copying to cache for some URIs
-        return null // Placeholder
+        return try {
+            // Copy content URI to cache directory for processing
+            if (uri.scheme == "content") {
+                val tempFile = File.createTempFile("encrypted_", ".pqrypt2", cacheDir)
+                contentResolver.openInputStream(uri)?.use { input ->
+                    tempFile.outputStream().use { output ->
+                        input.copyTo(output)
+                    }
+                }
+                tempFile.absolutePath
+            } else {
+                uri.path
+            }
+        } catch (e: Exception) {
+            null
+        }
     }
 
     private fun getDisplayPath(uri: Uri): String {
@@ -494,6 +560,11 @@ class SecureShareManualTextActivity : AppCompatActivity() {
 
     private fun showSuccess(message: String) {
         binding.tvStatus.text = message
+        Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
+    }
+    
+    private fun showOutputLocation(message: String, path: String) {
+        binding.tvStatus.text = "$message\nLocation: $path"
         Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
     }
 
