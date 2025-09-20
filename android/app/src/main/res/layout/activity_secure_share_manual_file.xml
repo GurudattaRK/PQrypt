@@ -208,7 +208,7 @@
             android:id="@+id/btn_choose_output_folder"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="Choose Output Folder"
+            android:text="Open Output Folder"
             android:textSize="16sp"
             android:padding="12dp"
             android:layout_marginBottom="8dp"
@@ -223,6 +223,19 @@
             android:text="No output folder selected"
             android:textSize="12sp"
             android:textColor="#666666" />
+
+        <!-- Cleanup button -->
+        <Button
+            android:id="@+id/btn_cleanup"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Cleanup All Key Files"
+            android:textSize="16sp"
+            android:padding="12dp"
+            android:layout_marginTop="16dp"
+            style="@style/Widget.Material3.Button"
+            android:backgroundTint="#f44336"
+            android:textColor="@android:color/white" />
 
     </LinearLayout>
 </ScrollView>

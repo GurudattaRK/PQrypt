@@ -49,7 +49,6 @@ class SecureShareBluetoothFileActivity : AppCompatActivity() {
     private var selectedDevice: BluetoothDevice? = null
     private var bluetoothSocket: BluetoothSocket? = null
     private var serverSocket: BluetoothServerSocket? = null
-    private var pickedFolderUri: Uri? = null
     
     // PQC Key exchange data
     private var senderState: Any? = null
@@ -83,25 +82,6 @@ class SecureShareBluetoothFileActivity : AppCompatActivity() {
         }
     }
 
-    private val folderPickerLauncher = registerForActivityResult(
-        ActivityResultContracts.StartActivityForResult()
-    ) { result ->
-        if (result.resultCode == Activity.RESULT_OK) {
-            val treeUri = result.data?.data
-            if (treeUri != null) {
-                pickedFolderUri = treeUri
-                binding.tvOutputFolder.text = "Output folder: ${getDisplayPath(treeUri)}"
-                // Persist permissions
-                try {
-                    val flags = result.data?.flags ?: 0
-                    contentResolver.takePersistableUriPermission(
-                        treeUri,
-                        flags and (Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
-                    )
-                } catch (_: Exception) {}
-            }
-        }
-    }
 
     private val bluetoothReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
@@ -141,16 +121,16 @@ class SecureShareBluetoothFileActivity : AppCompatActivity() {
     
     private fun setupDefaultOutputLocation() {
         try {
-            // Create default output directory: Documents/Pqcrypt/
+            // Create default output directory: Documents/pqrypt/
             val documentsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS)
-            defaultOutputDir = File(documentsDir, "Pqcrypt")
+            defaultOutputDir = File(documentsDir, "pqrypt")
             
             if (!defaultOutputDir!!.exists()) {
                 defaultOutputDir!!.mkdirs()
             }
         } catch (e: Exception) {
-            // Fallback to app's external files directory
-            defaultOutputDir = File(getExternalFilesDir(null), "Pqcrypt")
+            // Fallback to the same default path, not app-specific directory
+            defaultOutputDir = File("/storage/emulated/0/Documents/pqrypt")
             if (!defaultOutputDir!!.exists()) {
                 defaultOutputDir!!.mkdirs()
             }
@@ -162,7 +142,7 @@ class SecureShareBluetoothFileActivity : AppCompatActivity() {
         
         binding.btnBack.setOnClickListener { finish() }
         binding.btnHelp.setOnClickListener {
-            startActivity(Intent(this, HelpActivity::class.java).putExtra("screen", "secure_share"))
+            startActivity(Intent(this, SecureShareHelpActivity::class.java).putExtra("screen", "bluetooth_file"))
         }
 
         // File selection (sender only)
@@ -170,15 +150,8 @@ class SecureShareBluetoothFileActivity : AppCompatActivity() {
             openFilePicker()
         }
 
-        // Output folder selection (receiver only)
-        binding.btnChooseOutputFolder.setOnClickListener {
-            openFolderPicker()
-        }
-
-        // Bluetooth setup
-        binding.btnSetupBluetooth.setOnClickListener {
-            setupBluetooth()
-        }
+        // Auto-setup Bluetooth on activity start
+        setupBluetooth()
 
         // Discover/Connect button
         binding.btnDiscoverConnect.setOnClickListener {
@@ -187,6 +160,11 @@ class SecureShareBluetoothFileActivity : AppCompatActivity() {
             } else {
                 startListening()
             }
+        }
+        
+        // Open output folder button (use existing button if available)
+        binding.btnChooseOutputFolder?.setOnClickListener {
+            openOutputFolder()
         }
 
         // Setup RecyclerView for device list (sender only)
@@ -256,7 +234,6 @@ class SecureShareBluetoothFileActivity : AppCompatActivity() {
     private fun updateUI() {
         // Show/hide UI elements based on role
         binding.llFileSelection.visibility = if (isSender) View.VISIBLE else View.GONE
-        binding.llOutputFolder.visibility = if (!isSender) View.VISIBLE else View.GONE
         binding.rvDevices.visibility = if (isSender) View.VISIBLE else View.GONE
         
         // Update button texts
@@ -546,6 +523,9 @@ class SecureShareBluetoothFileActivity : AppCompatActivity() {
             binding.progressBar.progress = 100
             binding.tvProgressTitle.text = "Transfer Complete!"
             showSuccess("File encrypted and sent successfully!")
+            
+            // Cleanup intermediate files
+            cleanupIntermediateFiles()
         }
     }
 
@@ -587,6 +567,9 @@ class SecureShareBluetoothFileActivity : AppCompatActivity() {
             binding.progressBar.progress = 100
             binding.tvProgressTitle.text = "Transfer Complete!"
             showOutputLocation("File received and decrypted to:", decryptedFilePath)
+            
+            // Cleanup intermediate files
+            cleanupIntermediateFiles()
         }
     }
 
@@ -734,8 +717,17 @@ class SecureShareBluetoothFileActivity : AppCompatActivity() {
 
     private fun decryptReceivedFile(encryptedData: ByteArray, originalFileName: String): String {
         return try {
-            val outputDir = defaultOutputDir ?: cacheDir
+            val outputDir = defaultOutputDir ?: File("/storage/emulated/0/Documents/pqrypt")
+            if (!outputDir.exists()) {
+                outputDir.mkdirs()
+            }
             val tempEncFile = File.createTempFile("received_encrypted", ".pqrypt2", outputDir)
+            
+            // Delete existing file if it exists
+            if (tempEncFile.exists()) {
+                tempEncFile.delete()
+            }
+            
             tempEncFile.writeBytes(encryptedData)
             
             // Use original filename for the decrypted file
@@ -768,10 +760,6 @@ class SecureShareBluetoothFileActivity : AppCompatActivity() {
         filePickerLauncher.launch(intent)
     }
 
-    private fun openFolderPicker() {
-        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT_TREE)
-        folderPickerLauncher.launch(intent)
-    }
 
     private fun getRealPathFromUri(uri: Uri): String? {
         return try {
@@ -801,9 +789,6 @@ class SecureShareBluetoothFileActivity : AppCompatActivity() {
         }
     }
 
-    private fun getDisplayPath(uri: Uri): String {
-        return uri.path ?: "Selected folder"
-    }
 
     private fun showError(message: String) {
         binding.tvStatus.text = "Error: $message"
@@ -818,6 +803,58 @@ class SecureShareBluetoothFileActivity : AppCompatActivity() {
     private fun showOutputLocation(message: String, path: String) {
         binding.tvStatus.text = "$message\n$path"
         Toast.makeText(this, "$message $path", Toast.LENGTH_LONG).show()
+    }
+    
+    private fun cleanupIntermediateFiles() {
+        try {
+            val outputDir = defaultOutputDir ?: File("/storage/emulated/0/Documents/pqrypt")
+            if (outputDir.exists()) {
+                // Delete all .key files
+                outputDir.listFiles { _, name -> name.endsWith(".key") }?.forEach { it.delete() }
+                // Delete all .pqrypt2 files except the final ones we want to keep
+                outputDir.listFiles { _, name -> name.contains("received_encrypted") && name.endsWith(".pqrypt2") }?.forEach { it.delete() }
+                // Delete temporary files
+                outputDir.listFiles { _, name -> name.startsWith("share_") && name.endsWith(".tmp") }?.forEach { it.delete() }
+            }
+            
+            // Also clean cache directory
+            cacheDir.listFiles { _, name -> 
+                name.endsWith(".key") || name.endsWith(".tmp") || 
+                (name.contains("received_encrypted") && name.endsWith(".pqrypt2"))
+            }?.forEach { it.delete() }
+            
+        } catch (e: Exception) {
+            // Silent cleanup failure - don't bother user
+        }
+    }
+    
+    private fun openOutputFolder() {
+        try {
+            val outputDir = File("/storage/emulated/0/Documents/pqrypt")
+            if (!outputDir.exists()) {
+                outputDir.mkdirs()
+            }
+            
+            val intent = Intent(Intent.ACTION_VIEW)
+            intent.setDataAndType(android.net.Uri.fromFile(outputDir), "resource/folder")
+            intent.flags = Intent.FLAG_ACTIVITY_NEW_TASK
+            
+            try {
+                startActivity(intent)
+            } catch (e: Exception) {
+                // Fallback: use file manager intent
+                val fileManagerIntent = Intent(Intent.ACTION_VIEW)
+                fileManagerIntent.data = android.net.Uri.parse("content://com.android.externalstorage.documents/document/primary%3ADocuments%2Fpqrypt")
+                fileManagerIntent.type = "vnd.android.document/directory"
+                try {
+                    startActivity(fileManagerIntent)
+                } catch (e2: Exception) {
+                    Toast.makeText(this, "Files saved to: ${outputDir.absolutePath}", Toast.LENGTH_LONG).show()
+                }
+            }
+        } catch (e: Exception) {
+            Toast.makeText(this, "Files are saved to: /storage/emulated/0/Documents/pqrypt/", Toast.LENGTH_LONG).show()
+        }
     }
 
     override fun onDestroy() {

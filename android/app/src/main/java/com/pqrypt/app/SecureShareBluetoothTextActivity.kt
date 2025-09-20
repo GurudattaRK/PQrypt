@@ -106,16 +106,16 @@ class SecureShareBluetoothTextActivity : AppCompatActivity() {
     
     private fun setupDefaultOutputLocation() {
         try {
-            // Create default output directory: Documents/Pqcrypt/
+            // Create default output directory: Documents/pqrypt/
             val documentsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS)
-            defaultOutputDir = File(documentsDir, "Pqcrypt")
+            defaultOutputDir = File(documentsDir, "pqrypt")
             
             if (!defaultOutputDir!!.exists()) {
                 defaultOutputDir!!.mkdirs()
             }
         } catch (e: Exception) {
-            // Fallback to app's external files directory
-            defaultOutputDir = File(getExternalFilesDir(null), "Pqcrypt")
+            // Fallback to the same default path, not app-specific directory
+            defaultOutputDir = File("/storage/emulated/0/Documents/pqrypt")
             if (!defaultOutputDir!!.exists()) {
                 defaultOutputDir!!.mkdirs()
             }
@@ -127,7 +127,7 @@ class SecureShareBluetoothTextActivity : AppCompatActivity() {
         
         binding.btnBack.setOnClickListener { finish() }
         binding.btnHelp.setOnClickListener {
-            startActivity(Intent(this, HelpActivity::class.java).putExtra("screen", "secure_share"))
+            startActivity(Intent(this, SecureShareHelpActivity::class.java).putExtra("screen", "bluetooth_text"))
         }
 
         // Text input character counter and auto-key generation
@@ -146,10 +146,8 @@ class SecureShareBluetoothTextActivity : AppCompatActivity() {
             }
         })
 
-        // Bluetooth setup
-        binding.btnSetupBluetooth.setOnClickListener {
-            setupBluetooth()
-        }
+        // Auto-setup Bluetooth on activity start
+        setupBluetooth()
 
         // Discover/Connect button
         binding.btnDiscoverConnect.setOnClickListener {
@@ -159,6 +157,8 @@ class SecureShareBluetoothTextActivity : AppCompatActivity() {
                 startListening()
             }
         }
+        
+        // Note: Add open output folder functionality to existing buttons or layout if needed
 
         // Setup RecyclerView for device list (sender only)
         if (isSender) {
@@ -251,7 +251,11 @@ class SecureShareBluetoothTextActivity : AppCompatActivity() {
                 if (result != null && result.isNotEmpty()) {
                     // Store sender state for later use
                     withContext(Dispatchers.Main) {
-                        binding.tvStatus.text = "Keys auto-generated. Ready to connect via Bluetooth."
+                        binding.tvStatus.text = "Text transferred successfully!"
+                        showSuccess("Text sent via Bluetooth!")
+                        
+                        // Cleanup intermediate files
+                        cleanupIntermediateFiles()
                     }
                 }
             } catch (e: Exception) {
@@ -567,6 +571,9 @@ class SecureShareBluetoothTextActivity : AppCompatActivity() {
             binding.progressBar.progress = 100
             binding.tvProgressTitle.text = "Transfer Complete!"
             showSuccess("Text encrypted and sent successfully!")
+            
+            // Cleanup intermediate files
+            cleanupIntermediateFiles()
         }
     }
 
@@ -639,6 +646,9 @@ class SecureShareBluetoothTextActivity : AppCompatActivity() {
             binding.tvProgressTitle.text = "Transfer Complete!"
             binding.tvReceivedText.text = decryptedText
             showSuccess("Text received and decrypted successfully!")
+            
+            // Cleanup intermediate files
+            cleanupIntermediateFiles()
         }
     }
 
@@ -771,8 +781,17 @@ class SecureShareBluetoothTextActivity : AppCompatActivity() {
             }
             
             // Write encrypted data to temp file
-            val outputDir = defaultOutputDir ?: cacheDir
+            val outputDir = defaultOutputDir ?: File("/storage/emulated/0/Documents/pqrypt")
+            if (!outputDir.exists()) {
+                outputDir.mkdirs()
+            }
             val encryptedFile = File.createTempFile("received_encrypted", ".pqrypt2", outputDir)
+            
+            // Delete existing file if it exists
+            if (encryptedFile.exists()) {
+                encryptedFile.delete()
+            }
+            
             encryptedFile.writeBytes(encryptedData)
             
             val decryptedPath = "${encryptedFile.absolutePath}.decrypted"
@@ -815,20 +834,6 @@ class SecureShareBluetoothTextActivity : AppCompatActivity() {
         }
     }
 
-    private fun showError(message: String) {
-        binding.tvStatus.text = "Error: $message"
-        Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
-    }
-
-    private fun showSuccess(message: String) {
-        binding.tvStatus.text = message
-        Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
-    }
-    
-    private fun showOutputLocation(message: String, path: String) {
-        binding.tvStatus.text = "$message\n$path"
-        Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
-    }
 
     override fun onDestroy() {
         super.onDestroy()
@@ -855,6 +860,69 @@ class SecureShareBluetoothTextActivity : AppCompatActivity() {
             } else {
                 showError("Bluetooth permissions required for secure share")
             }
+        }
+    }
+    
+    private fun cleanupIntermediateFiles() {
+        try {
+            val outputDir = File("/storage/emulated/0/Documents/pqrypt")
+            if (outputDir.exists()) {
+                // Delete all .key files
+                outputDir.listFiles { _, name -> name.endsWith(".key") }?.forEach { it.delete() }
+                // Delete all .txt files created during text sharing
+                outputDir.listFiles { _, name -> name.startsWith("share_") && name.endsWith(".txt") }?.forEach { it.delete() }
+                // Delete temporary files
+                outputDir.listFiles { _, name -> name.startsWith("temp_") && name.endsWith(".txt") }?.forEach { it.delete() }
+            }
+            
+            // Also clean cache directory
+            cacheDir.listFiles { _, name -> 
+                name.endsWith(".key") || name.endsWith(".tmp") || 
+                (name.startsWith("share_") && name.endsWith(".txt")) ||
+                (name.startsWith("temp_") && name.endsWith(".txt"))
+            }?.forEach { it.delete() }
+            
+        } catch (e: Exception) {
+            // Silent cleanup failure - don't bother user
+        }
+    }
+    
+    private fun showError(message: String) {
+        binding.tvStatus.text = "Error: $message"
+        Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
+    }
+    
+    private fun showSuccess(message: String) {
+        binding.tvStatus.text = message
+        Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
+    }
+    
+    private fun openOutputFolder() {
+        try {
+            val outputDir = File("/storage/emulated/0/Documents/pqrypt")
+            if (!outputDir.exists()) {
+                outputDir.mkdirs()
+            }
+            
+            val intent = Intent(Intent.ACTION_VIEW)
+            intent.setDataAndType(android.net.Uri.fromFile(outputDir), "resource/folder")
+            intent.flags = Intent.FLAG_ACTIVITY_NEW_TASK
+            
+            try {
+                startActivity(intent)
+            } catch (e: Exception) {
+                // Fallback: use file manager intent
+                val fileManagerIntent = Intent(Intent.ACTION_VIEW)
+                fileManagerIntent.data = android.net.Uri.parse("content://com.android.externalstorage.documents/document/primary%3ADocuments%2Fpqrypt")
+                fileManagerIntent.type = "vnd.android.document/directory"
+                try {
+                    startActivity(fileManagerIntent)
+                } catch (e2: Exception) {
+                    Toast.makeText(this, "Files saved to: ${outputDir.absolutePath}", Toast.LENGTH_LONG).show()
+                }
+            }
+        } catch (e: Exception) {
+            Toast.makeText(this, "Files are saved to: /storage/emulated/0/Documents/pqrypt/", Toast.LENGTH_LONG).show()
         }
     }
 

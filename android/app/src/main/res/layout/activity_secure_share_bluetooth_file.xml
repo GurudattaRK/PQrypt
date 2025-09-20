@@ -204,7 +204,7 @@
                 android:id="@+id/btn_choose_output_folder"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="Choose Output Folder"
+                android:text="Open Output Folder"
                 android:textSize="16sp"
                 android:padding="12dp"
                 android:layout_marginBottom="8dp"

@@ -14,7 +14,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import android.os.ParcelFileDescriptor
+import android.os.Environment
 import java.io.File
+import androidx.documentfile.provider.DocumentFile
 
 class SecureShareManualFileActivity : AppCompatActivity() {
 
@@ -28,13 +30,16 @@ class SecureShareManualFileActivity : AppCompatActivity() {
     // File and key management
     private var selectedFileUri: Uri? = null
     private var selectedFilePath = ""
-    private var pickedFolderUri: Uri? = null
     private var finalSharedSecret: ByteArray? = null
     private var lastOutputPath: String? = null
+    private var senderState: ByteArray? = null
+    private var receiverState: ByteArray? = null
     
-    // PQC state objects
-    private var senderState: Any? = null
-    private var receiverState: Any? = null
+    // SAF saving state (copied from working PQC KeyExchangeProcessActivity)
+    private var pickedFolderUri: Uri? = null
+    private var pendingOutputBytes: ByteArray? = null
+    private var pendingSuggestedName: String? = null
+    private var pendingSuccessToast: String? = null
 
     private val filePickerLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
@@ -59,33 +64,30 @@ class SecureShareManualFileActivity : AppCompatActivity() {
         }
     }
 
-    private val folderPickerLauncher = registerForActivityResult(
+    private val pickFolderLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) { result ->
         if (result.resultCode == Activity.RESULT_OK) {
             val treeUri = result.data?.data
             if (treeUri != null) {
-                pickedFolderUri = treeUri
-                binding.tvOutputFolder.text = "Output folder: ${getDisplayPath(treeUri)}"
-                // Persist permissions
+                val flags = result.data?.flags ?: 0
                 try {
-                    val flags = result.data?.flags ?: 0
                     contentResolver.takePersistableUriPermission(
-                        treeUri, 
-                        flags and (Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+                        treeUri,
+                        (flags and (Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION))
                     )
                 } catch (_: Exception) {}
-            }
-        }
-    }
 
-    private val encryptedFilePickerLauncher = registerForActivityResult(
-        ActivityResultContracts.StartActivityForResult()
-    ) { result ->
-        if (result.resultCode == Activity.RESULT_OK) {
-            result.data?.data?.let { uri ->
-                handleEncryptedFileSelection(uri)
+                pickedFolderUri = treeUri
+                getSharedPreferences("pqrypt_prefs", MODE_PRIVATE)
+                    .edit().putString("picked_folder_uri", treeUri.toString()).apply()
+
+                if (pendingOutputBytes != null && !pendingSuggestedName.isNullOrEmpty()) {
+                    saveToPickedFolder()
+                }
             }
+        } else {
+            Toast.makeText(this, "Folder selection cancelled", Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -100,106 +102,113 @@ class SecureShareManualFileActivity : AppCompatActivity() {
         role = intent.getStringExtra("role") ?: "sender"
         isSender = role == "sender"
 
+        // Load persisted folder if available (same as PQC)
+        val saved = getSharedPreferences("pqrypt_prefs", MODE_PRIVATE).getString("picked_folder_uri", null)
+        if (!saved.isNullOrEmpty()) {
+            pickedFolderUri = Uri.parse(saved)
+        }
+
+        // Set initial step based on role
+        currentStep = 1
+
         setupUI()
         updateUI()
     }
 
     private fun setupUI() {
-        binding.tvRole.text = "Role: ${role.capitalize()}"
+        binding.tvRole.text = "Role: ${role.replaceFirstChar { it.uppercase() }}"
         
         binding.btnBack.setOnClickListener { finish() }
         binding.btnHelp.setOnClickListener {
-            startActivity(Intent(this, HelpActivity::class.java).putExtra("screen", "secure_share"))
+            startActivity(Intent(this, SecureShareHelpActivity::class.java).putExtra("screen", "manual_file"))
         }
 
-        // File selection (sender only)
+        // File selection button (sender only)
         binding.btnChooseFile.setOnClickListener {
             openFilePicker()
         }
 
-        // Output folder selection
-        binding.btnChooseOutputFolder.setOnClickListener {
-            openFolderPicker()
-        }
-
-        // Step buttons
+        // Single action button for main flow
         binding.btnStep1.setOnClickListener {
-            performStep1()
-        }
-
-        binding.btnStep2.setOnClickListener {
-            openKeyFilePicker()
-        }
-
-        binding.btnStep3.setOnClickListener {
-            openKeyFilePicker()
-        }
-
-        binding.btnStep4.setOnClickListener {
-            if (isSender) {
-                // Sender: auto-encrypt after final key generation
-                performFileEncryption()
-            } else {
-                // Receiver: choose encrypted file to decrypt
-                openEncryptedFilePicker()
+            when {
+                isSender && currentStep == 1 -> generateStep1Key()
+                isSender && currentStep == 2 -> openKeyFile("2.key")
+                !isSender && currentStep == 1 -> openKeyFile("1.key")
+                !isSender && currentStep == 2 -> openKeyFile("3.key")
+                !isSender && currentStep == 3 -> openEncryptedFilePicker()
             }
+        }
+
+        // Hide other step buttons
+        binding.btnStep2.visibility = View.GONE
+        binding.btnStep3.visibility = View.GONE
+        binding.btnStep4.visibility = View.GONE
+
+        // Hide output folder button - users already know where they saved files
+        binding.btnChooseOutputFolder.visibility = View.GONE
+
+        // Extra button - cleanup only
+        binding.btnCleanup.setOnClickListener {
+            cleanupIntermediateFiles()
         }
     }
 
     private fun updateUI() {
-        // Show/hide file selection based on role
-        binding.llFileSelection.visibility = if (isSender) View.VISIBLE else View.GONE
+        // Show/hide file selection for sender
+        binding.llFileSelection.visibility = if (isSender && currentStep == 1) View.VISIBLE else View.GONE
         
-        // Update step button texts based on role
-        if (isSender) {
-            binding.btnStep2.text = "Step 2: Open 2.key & Auto-Generate 3.key"
-            binding.btnStep4.text = "Step 4: Encrypt & Share File"
-        } else {
-            binding.btnStep2.text = "Step 2: Open 1.key & Auto-Generate 2.key"  
-            binding.btnStep3.text = "Step 3: Open 3.key & Auto-Generate final.key"
-            binding.btnStep4.text = "Step 4: Choose Encrypted File & Auto-Decrypt"
+        // Update main action button
+        binding.btnStep1.text = when {
+            isSender && currentStep == 1 -> "Generate 1.key"
+            isSender && currentStep == 2 -> "Open 2.key (will auto-encrypt)"
+            !isSender && currentStep == 1 -> "Open 1.key (will auto-generate 2.key)"
+            !isSender && currentStep == 2 -> "Open 3.key (will auto-generate final.key)"
+            !isSender && currentStep == 3 -> "Open Encrypted File (will auto-decrypt)"
+            else -> "Complete"
         }
-
-        // Enable/disable buttons based on current step and role
-        binding.btnStep1.isEnabled = currentStep == 1
-        binding.btnStep2.isEnabled = currentStep == 2
-        binding.btnStep3.isEnabled = currentStep == 3
-        binding.btnStep4.isEnabled = currentStep == 4
-
-        // For sender, require file selection before step 1
-        if (isSender && currentStep == 1) {
-            binding.btnStep1.isEnabled = selectedFileUri != null
+        
+        binding.btnStep1.isEnabled = when {
+            isSender && currentStep == 1 && selectedFileUri == null -> false
+            currentStep > 3 -> false
+            else -> true
+        }
+        
+        // Update status text
+        binding.tvStatus.text = when {
+            isSender && currentStep == 1 -> "Select file and generate 1.key to start"
+            isSender && currentStep == 2 -> "Open 2.key from receiver to continue"
+            isSender && currentStep > 2 -> "File encrypted! Share 3.key and encrypted file"
+            !isSender && currentStep == 1 -> "Open 1.key from sender to start"
+            !isSender && currentStep == 2 -> "Open 3.key from sender to continue"
+            !isSender && currentStep == 3 -> "Open encrypted file to decrypt"
+            else -> "Process complete!"
         }
     }
 
-    private fun performStep1() {
+    private fun generateStep1Key() {
+        if (!isSender || selectedFileUri == null) {
+            showError("Please select a file first")
+            return
+        }
+
         lifecycleScope.launch(Dispatchers.IO) {
             try {
-                // Generate initial key (1.key for sender, response varies for receiver)
-                val result = if (isSender) {
-                    val initResult = RustyCrypto.pqc4HybridInit()
-                    senderState = initResult[1] as ByteArray
-                    initResult[0] as ByteArray
-                } else {
-                    // Receiver doesn't do step 1, this shouldn't happen
-                    return@launch
-                }
-
+                resetStates()
+                
+                val result = RustyCrypto.pqc4HybridInit() as Array<*>
+                val publicKey = result[0] as ByteArray
+                senderState = result[1] as ByteArray
+                
                 withContext(Dispatchers.Main) {
-                    if (result != null && result.isNotEmpty()) {
-                        // Save the key file
-                        saveKeyFile(result, "1.key")
-                        binding.tvStep1Result.text = "Generated 1.key - Share with receiver"
-                        binding.tvStep1Result.visibility = View.VISIBLE
-                        currentStep = 2
-                        updateUI()
-                    } else {
-                        showError("Failed to generate initial key")
-                    }
+                    queueSaveAndPersist("1.key", publicKey, "1.key generated successfully")
+                    binding.tvStep1Result.text = "1.key generated - Share with receiver"
+                    binding.tvStep1Result.visibility = View.VISIBLE
+                    currentStep = 2
+                    updateUI()
                 }
             } catch (e: Exception) {
                 withContext(Dispatchers.Main) {
-                    showError("Error generating key: ${e.message}")
+                    showError("Error generating 1.key: ${e.message}")
                 }
             }
         }
@@ -216,134 +225,78 @@ class SecureShareManualFileActivity : AppCompatActivity() {
                     return@launch
                 }
 
-                val result = when (currentStep) {
-                    2 -> {
-                        if (isSender) {
-                            // Sender opening 2.key, generate 3.key
-                            val sndFinalResult = RustyCrypto.pqc4HybridSndFinal(keyData, senderState as ByteArray)
-                            finalSharedSecret = sndFinalResult[0] as ByteArray
-                            sndFinalResult[1] as ByteArray
-                        } else {
-                            // Receiver opening 1.key, generate 2.key
-                            val recvResult = RustyCrypto.pqc4HybridRecv(keyData)
-                            receiverState = recvResult[1] as ByteArray
-                            recvResult[0] as ByteArray
-                        }
-                    }
-                    3 -> {
-                        if (!isSender) {
-                            // Receiver opening 3.key, generate final.key
-                            RustyCrypto.pqc4HybridRecvFinal(keyData, receiverState as ByteArray)
-                        } else null
-                    }
-                    else -> null
-                }
-
-                withContext(Dispatchers.Main) {
-                    if (result != null && result.isNotEmpty()) {
-                        val fileName = when (currentStep) {
-                            2 -> if (isSender) "3.key" else "2.key"
-                            3 -> "final.key"
-                            else -> "key.key"
-                        }
+                when {
+                    // Receiver opening 1.key -> auto-generate 2.key
+                    !isSender && currentStep == 1 -> {
+                        resetStates()
+                        val recvResult = RustyCrypto.pqc4HybridRecv(keyData)
+                        val response = recvResult[0] as ByteArray
+                        receiverState = recvResult[1] as ByteArray
                         
-                        saveKeyFile(result, fileName)
-                        
-                        val message = when (currentStep) {
-                            2 -> if (isSender) "Generated 3.key - Share with receiver" else "Generated 2.key - Share with sender"
-                            3 -> "Generated final.key - Ready for file operations"
-                            else -> "Key generated"
-                        }
-                        
-                        when (currentStep) {
-                            2 -> {
-                                binding.tvStep2Result.text = message
-                                binding.tvStep2Result.visibility = View.VISIBLE
-                            }
-                            3 -> {
-                                binding.tvStep3Result.text = message
-                                binding.tvStep3Result.visibility = View.VISIBLE
-                                if (currentStep == 3) finalSharedSecret = result
+                        withContext(Dispatchers.Main) {
+                            if (response.isNotEmpty()) {
+                                queueSaveAndPersist("2.key", response, "2.key generated - Share with sender")
+                                binding.tvStep1Result.text = "2.key auto-generated - Share with sender"
+                                binding.tvStep1Result.visibility = View.VISIBLE
+                                currentStep = 2
+                                updateUI()
+                            } else {
+                                showError("Failed to generate 2.key")
                             }
                         }
+                    }
+                    
+                    // Sender opening 2.key -> auto-generate 3.key, final.key and encrypt file
+                    isSender && currentStep == 2 -> {
+                        if (senderState == null) {
+                            withContext(Dispatchers.Main) {
+                                showError("Sender state not initialized. Please restart from Step 1.")
+                            }
+                            return@launch
+                        }
                         
-                        currentStep++
-                        updateUI()
+                        val sndFinalResult = RustyCrypto.pqc4HybridSndFinal(keyData, senderState!!)
+                        finalSharedSecret = sndFinalResult[0] as ByteArray
+                        val result3Key = sndFinalResult[1] as ByteArray
                         
-                        // Auto-encrypt for sender when final key is generated
-                        if (isSender && currentStep == 4) {
+                        withContext(Dispatchers.Main) {
+                            queueSaveAndPersist("3.key", result3Key, "3.key generated")
+                            queueSaveAndPersist("final.key", finalSharedSecret!!, "final.key generated")
+                            binding.tvStep2Result.text = "Keys generated - Auto-encrypting file..."
+                            binding.tvStep2Result.visibility = View.VISIBLE
+                            
+                            // Auto-encrypt file
                             performFileEncryption()
                         }
-                    } else {
-                        showError("Failed to process key file")
+                    }
+                    
+                    // Receiver opening 3.key -> auto-generate final.key
+                    !isSender && currentStep == 2 -> {
+                        if (receiverState == null) {
+                            withContext(Dispatchers.Main) {
+                                showError("Receiver state not initialized. Please restart from Step 1.")
+                            }
+                            return@launch
+                        }
+                        
+                        finalSharedSecret = RustyCrypto.pqc4HybridRecvFinal(keyData, receiverState!!)
+                        
+                        withContext(Dispatchers.Main) {
+                            if (finalSharedSecret != null && finalSharedSecret!!.isNotEmpty()) {
+                                queueSaveAndPersist("final.key", finalSharedSecret!!, "final.key generated - Ready to decrypt")
+                                binding.tvStep2Result.text = "final.key auto-generated - Ready to decrypt"
+                                binding.tvStep2Result.visibility = View.VISIBLE
+                                currentStep = 3
+                                updateUI()
+                            } else {
+                                showError("Failed to generate final key")
+                            }
+                        }
                     }
                 }
             } catch (e: Exception) {
                 withContext(Dispatchers.Main) {
                     showError("Error processing key: ${e.message}")
-                }
-            }
-        }
-    }
-
-    private fun handleEncryptedFileSelection(uri: Uri) {
-        if (finalSharedSecret == null) {
-            showError("Final key not generated yet")
-            return
-        }
-
-        lifecycleScope.launch(Dispatchers.IO) {
-            try {
-                val inputPath = getRealPathFromUri(uri)
-                if (inputPath == null) {
-                    withContext(Dispatchers.Main) {
-                        showError("Cannot access encrypted file")
-                    }
-                    return@launch
-                }
-
-                val fileName = File(inputPath).name
-                val outputName = if (fileName.endsWith(".secure_share.pqrypt2")) {
-                    fileName.removeSuffix(".secure_share.pqrypt2")
-                } else if (fileName.endsWith(".pqrypt2")) {
-                    fileName.removeSuffix(".pqrypt2")
-                } else {
-                    "${fileName}.decrypted"
-                }
-                
-                // Use default output directory or app's files directory
-                val outputDir = File(getExternalFilesDir(null), "Pqcrypt")
-                if (!outputDir.exists()) {
-                    outputDir.mkdirs()
-                }
-                val outputPath = File(outputDir, outputName).absolutePath
-
-                // Open file descriptors for decryption
-                val inputFd = ParcelFileDescriptor.open(File(inputPath), ParcelFileDescriptor.MODE_READ_ONLY)
-                val outputFd = ParcelFileDescriptor.open(File(outputPath), ParcelFileDescriptor.MODE_CREATE or ParcelFileDescriptor.MODE_WRITE_ONLY)
-
-                val success = try {
-                    RustyCrypto.tripleDecryptFd(finalSharedSecret!!, false, inputFd.fd, outputFd.fd)
-                } catch (e: Exception) {
-                    -1 // failure
-                } finally {
-                    inputFd.close()
-                    outputFd.close()
-                }
-
-                withContext(Dispatchers.Main) {
-                    if (success == 0) {
-                        lastOutputPath = outputPath
-                        binding.tvStep4Result.text = "File decrypted: ${File(outputPath).name}\nLocation: $outputPath"
-                        binding.tvStep4Result.visibility = View.VISIBLE
-                        showSuccess("File decrypted to: $outputPath")
-                    } else {
-                        showError("File decryption failed")
-                    }
-                }
-            } catch (e: Exception) {
-                withContext(Dispatchers.Main) {
-                    showError("Decryption error: ${e.message}")
                 }
             }
         }
@@ -365,37 +318,105 @@ class SecureShareManualFileActivity : AppCompatActivity() {
                     return@launch
                 }
 
-                // Use same directory as the selected file for encryption
-            val originalFile = File(inputPath)
-            val outputPath = File(originalFile.parent, "${originalFile.name}.secure_share.pqrypt2").absolutePath
+                val originalFile = File(inputPath)
+                val encryptedFileName = "${originalFile.nameWithoutExtension}.encrypted"
                 
-                // Open file descriptors for real encryption
+                val outputFile = File.createTempFile("encrypted_", ".tmp", cacheDir)
+                
                 val inputFd = ParcelFileDescriptor.open(File(inputPath), ParcelFileDescriptor.MODE_READ_ONLY)
-                val outputFd = ParcelFileDescriptor.open(File(outputPath), ParcelFileDescriptor.MODE_CREATE or ParcelFileDescriptor.MODE_WRITE_ONLY)
+                val outputFd = ParcelFileDescriptor.open(outputFile, ParcelFileDescriptor.MODE_CREATE or ParcelFileDescriptor.MODE_WRITE_ONLY)
                 
                 val success = try {
-                    // Use real triple encryption with the shared secret
                     RustyCrypto.tripleEncryptFd(finalSharedSecret!!, false, inputFd.fd, outputFd.fd)
                 } catch (e: Exception) {
-                    -1 // failure
+                    -1
                 } finally {
                     inputFd.close()
                     outputFd.close()
                 }
 
-                withContext(Dispatchers.Main) {
-                    if (success == 0) {
-                        lastOutputPath = outputPath
-                        binding.tvStep4Result.text = "File encrypted: ${File(outputPath).name}\nLocation: $outputPath"
-                        binding.tvStep4Result.visibility = View.VISIBLE
-                        showSuccess("File encrypted to: $outputPath")
-                    } else {
+                if (success == 0) {
+                    val encryptedBytes = outputFile.readBytes()
+                    withContext(Dispatchers.Main) {
+                        queueSaveAndPersist(encryptedFileName, encryptedBytes, "File encrypted successfully!")
+                        binding.tvStep3Result.text = "File auto-encrypted!"
+                        binding.tvStep3Result.visibility = View.VISIBLE
+                        currentStep = 4
+                        updateUI()
+                    }
+                } else {
+                    withContext(Dispatchers.Main) {
                         showError("File encryption failed")
                     }
                 }
+                
+                outputFile.delete()
             } catch (e: Exception) {
                 withContext(Dispatchers.Main) {
                     showError("Encryption error: ${e.message}")
+                }
+            }
+        }
+    }
+
+    private fun performFileDecryption(uri: Uri) {
+        if (finalSharedSecret == null) {
+            showError("No decryption key available")
+            return
+        }
+
+        lifecycleScope.launch(Dispatchers.IO) {
+            try {
+                val inputPath = getRealPathFromUri(uri)
+                if (inputPath == null) {
+                    withContext(Dispatchers.Main) {
+                        showError("Cannot access encrypted file")
+                    }
+                    return@launch
+                }
+
+                val fileName = File(inputPath).name
+                val outputName = if (fileName.endsWith(".encrypted")) {
+                    fileName.removeSuffix(".encrypted")
+                } else if (fileName.endsWith(".pqrypt2")) {
+                    fileName.removeSuffix(".pqrypt2")
+                } else {
+                    "${fileName}.decrypted"
+                }
+                
+                val outputFile = File.createTempFile("decrypted_", ".tmp", cacheDir)
+                
+                val inputFd = ParcelFileDescriptor.open(File(inputPath), ParcelFileDescriptor.MODE_READ_ONLY)
+                val outputFd = ParcelFileDescriptor.open(outputFile, ParcelFileDescriptor.MODE_CREATE or ParcelFileDescriptor.MODE_WRITE_ONLY)
+
+                val success = try {
+                    RustyCrypto.tripleDecryptFd(finalSharedSecret!!, false, inputFd.fd, outputFd.fd)
+                } catch (e: Exception) {
+                    -1
+                } finally {
+                    inputFd.close()
+                    outputFd.close()
+                }
+
+                if (success == 0) {
+                    val decryptedBytes = outputFile.readBytes()
+                    withContext(Dispatchers.Main) {
+                        queueSaveAndPersist(outputName, decryptedBytes, "File decrypted successfully!")
+                        binding.tvStep3Result.text = "File auto-decrypted!"
+                        binding.tvStep3Result.visibility = View.VISIBLE
+                        currentStep = 4
+                        updateUI()
+                    }
+                } else {
+                    withContext(Dispatchers.Main) {
+                        showError("File decryption failed")
+                    }
+                }
+                
+                outputFile.delete()
+            } catch (e: Exception) {
+                withContext(Dispatchers.Main) {
+                    showError("Decryption error: ${e.message}")
                 }
             }
         }
@@ -409,7 +430,7 @@ class SecureShareManualFileActivity : AppCompatActivity() {
         filePickerLauncher.launch(intent)
     }
 
-    private fun openKeyFilePicker() {
+    private fun openKeyFile(expectedFile: String) {
         val intent = Intent(Intent.ACTION_GET_CONTENT).apply {
             type = "*/*"
             addCategory(Intent.CATEGORY_OPENABLE)
@@ -422,29 +443,91 @@ class SecureShareManualFileActivity : AppCompatActivity() {
             type = "*/*"
             addCategory(Intent.CATEGORY_OPENABLE)
         }
-        encryptedFilePickerLauncher.launch(intent)
+        keyFilePickerLauncher.launch(intent)
     }
 
-    private fun openFolderPicker() {
-        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT_TREE)
-        folderPickerLauncher.launch(intent)
+    private fun resetStates() {
+        senderState = null
+        receiverState = null
+        finalSharedSecret = null
     }
 
-    private fun saveKeyFile(keyData: ByteArray, fileName: String) {
-        try {
-            // Use default output directory
-            val outputDir = File(getExternalFilesDir(null), "Pqcrypt")
-            if (!outputDir.exists()) {
-                outputDir.mkdirs()
+    // SAF functions copied from working PQC KeyExchangeProcessActivity
+    private fun queueSaveAndPersist(filename: String, keyData: ByteArray, successMsg: String) {
+        lifecycleScope.launch(Dispatchers.Main) {
+            pendingOutputBytes = keyData
+            pendingSuggestedName = filename
+            pendingSuccessToast = successMsg
+            if (pickedFolderUri != null) {
+                saveToPickedFolder()
+            } else {
+                launchPickFolder()
             }
-            
-            val keyFile = File(outputDir, fileName)
-            keyFile.writeBytes(keyData)
-            
-            showSuccess("Key saved to: ${keyFile.absolutePath}")
-        } catch (e: Exception) {
-            showError("Failed to save key file: ${e.message}")
         }
+    }
+
+    private fun launchPickFolder() {
+        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT_TREE).apply {
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION or Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION or Intent.FLAG_GRANT_PREFIX_URI_PERMISSION)
+            try {
+                val hinted = buildPQryptInitialTreeUri()
+                if (hinted != null) {
+                    putExtra("android.provider.extra.INITIAL_URI", hinted)
+                }
+            } catch (_: Exception) {}
+        }
+        pickFolderLauncher.launch(intent)
+    }
+
+    private fun buildPQryptInitialTreeUri(): Uri? {
+        return try {
+            val docs = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS)
+            val pqrypt = File(docs, "PQrypt")
+            if (!pqrypt.exists()) pqrypt.mkdirs()
+
+            val authority = "com.android.externalstorage.documents"
+            val docId = "primary:Documents/PQrypt"
+            android.provider.DocumentsContract.buildTreeDocumentUri(authority, docId)
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    private fun saveToPickedFolder() {
+        val folderUri = pickedFolderUri
+        val bytes = pendingOutputBytes
+        val name = pendingSuggestedName
+        if (folderUri == null || bytes == null || name.isNullOrEmpty()) return
+
+        try {
+            val outUri = createUniqueDocumentCopySuffix(folderUri, "application/octet-stream", name)
+            if (outUri != null) {
+                contentResolver.openOutputStream(outUri)?.use { it.write(bytes) }
+                binding.tvStatus.text = pendingSuccessToast ?: "Saved"
+                Toast.makeText(this, pendingSuccessToast ?: "Saved", Toast.LENGTH_SHORT).show()
+            } else {
+                Toast.makeText(this, "Failed to create file in selected folder", Toast.LENGTH_LONG).show()
+            }
+        } catch (e: Exception) {
+            Toast.makeText(this, "Save failed: ${e.message}", Toast.LENGTH_LONG).show()
+        } finally {
+            pendingOutputBytes = null
+            pendingSuggestedName = null
+            pendingSuccessToast = null
+        }
+    }
+
+    private fun createUniqueDocumentCopySuffix(treeUri: Uri, mime: String, desiredName: String): Uri? {
+        val treeDoc = DocumentFile.fromTreeUri(this, treeUri) ?: return null
+        
+        val existingFile = treeDoc.findFile(desiredName)
+        if (existingFile != null && existingFile.exists()) {
+            existingFile.delete()
+        }
+
+        val parentDocId = android.provider.DocumentsContract.getTreeDocumentId(treeUri)
+        val parentDocUri = android.provider.DocumentsContract.buildDocumentUriUsingTree(treeUri, parentDocId)
+        return android.provider.DocumentsContract.createDocument(contentResolver, parentDocUri, mime, desiredName)
     }
 
     private fun readFileBytes(uri: Uri): ByteArray? {
@@ -455,20 +538,10 @@ class SecureShareManualFileActivity : AppCompatActivity() {
         }
     }
 
-    private fun getFileName(uri: Uri): String? {
-        return contentResolver.query(uri, null, null, null, null)?.use { cursor ->
-            val nameIndex = cursor.getColumnIndex("_display_name")
-            if (nameIndex >= 0 && cursor.moveToFirst()) {
-                cursor.getString(nameIndex)
-            } else null
-        }
-    }
-
     private fun getRealPathFromUri(uri: Uri): String? {
         return try {
-            // For content URIs, copy to cache directory
             if (uri.scheme == "content") {
-                val tempFile = File.createTempFile("manual_", ".tmp", cacheDir)
+                val tempFile = File.createTempFile("encrypted_", ".tmp", cacheDir)
                 contentResolver.openInputStream(uri)?.use { input ->
                     tempFile.outputStream().use { output ->
                         input.copyTo(output)
@@ -483,17 +556,61 @@ class SecureShareManualFileActivity : AppCompatActivity() {
         }
     }
 
-    private fun getDisplayPath(uri: Uri): String {
-        return uri.path ?: "Selected folder"
+    private fun getFileName(uri: Uri): String? {
+        return contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+            val nameIndex = cursor.getColumnIndex("_display_name")
+            if (nameIndex >= 0 && cursor.moveToFirst()) {
+                cursor.getString(nameIndex)
+            } else null
+        } ?: uri.lastPathSegment ?: "unknown"
+    }
+
+    private fun cleanupIntermediateFiles() {
+        lifecycleScope.launch(Dispatchers.IO) {
+            try {
+                var deletedCount = 0
+                
+                // Clean cache directory only
+                cacheDir.listFiles()?.forEach { file ->
+                    if (file.name.startsWith("encrypted_") ||
+                        file.name.startsWith("decrypted_") ||
+                        file.name.endsWith(".tmp")) {
+                        if (file.delete()) deletedCount++
+                    }
+                }
+                
+                // Clean up key files in picked folder if available
+                pickedFolderUri?.let { folderUri ->
+                    val treeDoc = DocumentFile.fromTreeUri(this@SecureShareManualFileActivity, folderUri)
+                    treeDoc?.listFiles()?.forEach { file ->
+                        val name = file.name ?: ""
+                        if (name.endsWith(".key") || name.endsWith(".pqrypt2") || 
+                            name.endsWith(".encrypted") || name.endsWith(".txt")) {
+                            if (file.delete()) deletedCount++
+                        }
+                    }
+                }
+                
+                resetStates()
+                
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(this@SecureShareManualFileActivity, 
+                        "Cleaned up $deletedCount files", 
+                        Toast.LENGTH_SHORT).show()
+                    binding.tvStatus.text = "Cleanup completed"
+                }
+            } catch (e: Exception) {
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(this@SecureShareManualFileActivity, 
+                        "Cleanup completed", 
+                        Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
     }
 
     private fun showError(message: String) {
         binding.tvStatus.text = "Error: $message"
-        Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
-    }
-
-    private fun showSuccess(message: String) {
-        binding.tvStatus.text = message
         Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
     }
 }
