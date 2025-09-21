@@ -109,6 +109,9 @@
             android:name=".SecureShareBluetoothTextActivity"
             android:exported="false" />
 
+        <activity
+            android:name=".SecureShareHelpActivity"
+            android:exported="false" />
             
     </application> 
 

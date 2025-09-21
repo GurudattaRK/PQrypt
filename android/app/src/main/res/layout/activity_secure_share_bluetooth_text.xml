@@ -147,19 +147,6 @@
                 android:layout_marginBottom="16dp" />
         </LinearLayout>
 
-        <!-- Bluetooth Setup -->
-        <Button
-            android:id="@+id/btn_setup_bluetooth"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="Setup Bluetooth"
-            android:textSize="16sp"
-            android:padding="12dp"
-            android:layout_marginBottom="8dp"
-            style="@style/Widget.Material3.Button"
-            android:backgroundTint="#2196F3"
-            android:textColor="@android:color/white" />
-
         <!-- Device Discovery (Sender) / Listen for Connection (Receiver) -->
         <Button
             android:id="@+id/btn_discover_connect"

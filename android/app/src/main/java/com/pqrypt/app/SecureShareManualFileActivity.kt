@@ -144,8 +144,7 @@ class SecureShareManualFileActivity : AppCompatActivity() {
         binding.btnStep3.visibility = View.GONE
         binding.btnStep4.visibility = View.GONE
 
-        // Hide output folder button - users already know where they saved files
-        binding.btnChooseOutputFolder.visibility = View.GONE
+        // Output folder button removed - users already know where they saved files
 
         // Extra button - cleanup only
         binding.btnCleanup.setOnClickListener {

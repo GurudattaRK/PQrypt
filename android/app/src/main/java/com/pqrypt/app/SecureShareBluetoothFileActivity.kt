@@ -28,6 +28,7 @@ import com.pqrypt.app.databinding.ActivitySecureShareBluetoothFileBinding
 import kotlinx.coroutines.*
 import android.os.ParcelFileDescriptor
 import android.os.Environment
+import android.util.Log
 import java.io.*
 import java.util.*
 
@@ -56,6 +57,18 @@ class SecureShareBluetoothFileActivity : AppCompatActivity() {
     private var finalSharedSecret: ByteArray? = null
     private var defaultOutputDir: File? = null
     
+    // Bluetooth enable launcher for Android 12+ compatibility
+    private val bluetoothEnableLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == Activity.RESULT_OK) {
+            Toast.makeText(this, "Bluetooth enabled", Toast.LENGTH_SHORT).show()
+            checkPermissions()
+        } else {
+            showError("Bluetooth is required for this feature")
+        }
+    }
+
     companion object {
         private const val UUID_STRING = "8ce255c0-223a-11e0-ac64-0800200c9a66"
         private val MY_UUID = UUID.fromString(UUID_STRING)
@@ -121,16 +134,16 @@ class SecureShareBluetoothFileActivity : AppCompatActivity() {
     
     private fun setupDefaultOutputLocation() {
         try {
-            // Create default output directory: Documents/pqrypt/
+            // Create default output directory: Documents/PQrypt/
             val documentsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS)
-            defaultOutputDir = File(documentsDir, "pqrypt")
+            defaultOutputDir = File(documentsDir, "PQrypt")
             
             if (!defaultOutputDir!!.exists()) {
                 defaultOutputDir!!.mkdirs()
             }
         } catch (e: Exception) {
             // Fallback to the same default path, not app-specific directory
-            defaultOutputDir = File("/storage/emulated/0/Documents/pqrypt")
+            defaultOutputDir = File("/storage/emulated/0/Documents/PQrypt")
             if (!defaultOutputDir!!.exists()) {
                 defaultOutputDir!!.mkdirs()
             }
@@ -152,6 +165,8 @@ class SecureShareBluetoothFileActivity : AppCompatActivity() {
 
         // Auto-setup Bluetooth on activity start
         setupBluetooth()
+        
+        // Setup bluetooth button removed from layout - everything is automatic now
 
         // Discover/Connect button
         binding.btnDiscoverConnect.setOnClickListener {
@@ -162,9 +177,14 @@ class SecureShareBluetoothFileActivity : AppCompatActivity() {
             }
         }
         
-        // Open output folder button (use existing button if available)
+        // Open output folder button (receiver only)
         binding.btnChooseOutputFolder?.setOnClickListener {
             openOutputFolder()
+        }
+        
+        // Show output folder button only for receiver
+        if (!isSender) {
+            binding.llOutputFolder?.visibility = View.VISIBLE
         }
 
         // Setup RecyclerView for device list (sender only)
@@ -187,23 +207,46 @@ class SecureShareBluetoothFileActivity : AppCompatActivity() {
             return
         }
 
+        // Check permissions first, then enable Bluetooth if needed
+        checkPermissions()
+        
         if (!bluetoothAdapter!!.isEnabled) {
             val enableBtIntent = Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE)
-            startActivityForResult(enableBtIntent, REQUEST_ENABLE_BT)
+            bluetoothEnableLauncher.launch(enableBtIntent)
         }
     }
 
     private fun checkPermissions() {
         val permissions = mutableListOf<String>()
         
-        if (ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED) {
-            permissions.add(Manifest.permission.BLUETOOTH_CONNECT)
+        // Check Android version and add appropriate Bluetooth permissions
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
+            // Android 12+ (API 31+) - Use new granular Bluetooth permissions
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_SCAN) != PackageManager.PERMISSION_GRANTED) {
+                permissions.add(Manifest.permission.BLUETOOTH_SCAN)
+            }
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED) {
+                permissions.add(Manifest.permission.BLUETOOTH_CONNECT)
+            }
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_ADVERTISE) != PackageManager.PERMISSION_GRANTED) {
+                permissions.add(Manifest.permission.BLUETOOTH_ADVERTISE)
+            }
+        } else {
+            // Android 11 and below - Use legacy Bluetooth permissions
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH) != PackageManager.PERMISSION_GRANTED) {
+                permissions.add(Manifest.permission.BLUETOOTH)
+            }
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_ADMIN) != PackageManager.PERMISSION_GRANTED) {
+                permissions.add(Manifest.permission.BLUETOOTH_ADMIN)
+            }
         }
-        if (ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_SCAN) != PackageManager.PERMISSION_GRANTED) {
-            permissions.add(Manifest.permission.BLUETOOTH_SCAN)
-        }
+        
+        // Location permissions required for Bluetooth device discovery
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
             permissions.add(Manifest.permission.ACCESS_FINE_LOCATION)
+        }
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
+            permissions.add(Manifest.permission.ACCESS_COARSE_LOCATION)
         }
 
         if (permissions.isNotEmpty()) {
@@ -717,7 +760,7 @@ class SecureShareBluetoothFileActivity : AppCompatActivity() {
 
     private fun decryptReceivedFile(encryptedData: ByteArray, originalFileName: String): String {
         return try {
-            val outputDir = defaultOutputDir ?: File("/storage/emulated/0/Documents/pqrypt")
+            val outputDir = defaultOutputDir ?: File("/storage/emulated/0/Documents/PQrypt")
             if (!outputDir.exists()) {
                 outputDir.mkdirs()
             }
@@ -790,15 +833,63 @@ class SecureShareBluetoothFileActivity : AppCompatActivity() {
     }
 
 
+    private fun openOutputFolder() {
+        try {
+            val outputDir = defaultOutputDir ?: File("/storage/emulated/0/Documents/PQrypt")
+            
+            // Try using DocumentsContract URI for exact folder navigation
+            val documentsUri = android.net.Uri.parse("content://com.android.externalstorage.documents/document/primary%3ADocuments%2FPQrypt")
+            val intent = Intent(Intent.ACTION_VIEW)
+            intent.setDataAndType(documentsUri, "vnd.android.document/directory")
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            
+            if (intent.resolveActivity(packageManager) != null) {
+                startActivity(intent)
+            } else {
+                // Fallback 1: Try with file:// URI
+                val fileIntent = Intent(Intent.ACTION_VIEW)
+                fileIntent.setDataAndType(android.net.Uri.fromFile(outputDir), "resource/folder")
+                fileIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                
+                if (fileIntent.resolveActivity(packageManager) != null) {
+                    startActivity(fileIntent)
+                } else {
+                    // Fallback 2: Open file manager with chooser
+                    val fileManagerIntent = Intent(Intent.ACTION_OPEN_DOCUMENT_TREE)
+                    fileManagerIntent.putExtra("android.provider.extra.INITIAL_URI", documentsUri)
+                    
+                    try {
+                        startActivity(fileManagerIntent)
+                    } catch (e: Exception) {
+                        // Final fallback: Show path and open generic file manager
+                        val genericIntent = Intent(Intent.ACTION_GET_CONTENT)
+                        genericIntent.type = "*/*"
+                        genericIntent.addCategory(Intent.CATEGORY_OPENABLE)
+                        
+                        try {
+                            startActivity(Intent.createChooser(genericIntent, "Open File Manager"))
+                            Toast.makeText(this, "Navigate to Documents/PQrypt folder", Toast.LENGTH_LONG).show()
+                        } catch (e2: Exception) {
+                            Toast.makeText(this, "Output files saved to: ${outputDir.absolutePath}", Toast.LENGTH_LONG).show()
+                        }
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            Toast.makeText(this, "Output files saved to: /storage/emulated/0/Documents/PQrypt", Toast.LENGTH_LONG).show()
+        }
+    }
+
     private fun showError(message: String) {
         binding.tvStatus.text = "Error: $message"
-        Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
+        Toast.makeText(this, message, Toast.LENGTH_LONG).show()
     }
 
     private fun showSuccess(message: String) {
         binding.tvStatus.text = message
         Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
     }
+
     
     private fun showOutputLocation(message: String, path: String) {
         binding.tvStatus.text = "$message\n$path"
@@ -807,7 +898,7 @@ class SecureShareBluetoothFileActivity : AppCompatActivity() {
     
     private fun cleanupIntermediateFiles() {
         try {
-            val outputDir = defaultOutputDir ?: File("/storage/emulated/0/Documents/pqrypt")
+            val outputDir = defaultOutputDir ?: File("/storage/emulated/0/Documents/PQrypt")
             if (outputDir.exists()) {
                 // Delete all .key files
                 outputDir.listFiles { _, name -> name.endsWith(".key") }?.forEach { it.delete() }
@@ -824,44 +915,18 @@ class SecureShareBluetoothFileActivity : AppCompatActivity() {
             }?.forEach { it.delete() }
             
         } catch (e: Exception) {
-            // Silent cleanup failure - don't bother user
+            Log.e("Cleanup", "Failed to clean up intermediate files", e)
         }
     }
     
-    private fun openOutputFolder() {
-        try {
-            val outputDir = File("/storage/emulated/0/Documents/pqrypt")
-            if (!outputDir.exists()) {
-                outputDir.mkdirs()
-            }
-            
-            val intent = Intent(Intent.ACTION_VIEW)
-            intent.setDataAndType(android.net.Uri.fromFile(outputDir), "resource/folder")
-            intent.flags = Intent.FLAG_ACTIVITY_NEW_TASK
-            
-            try {
-                startActivity(intent)
-            } catch (e: Exception) {
-                // Fallback: use file manager intent
-                val fileManagerIntent = Intent(Intent.ACTION_VIEW)
-                fileManagerIntent.data = android.net.Uri.parse("content://com.android.externalstorage.documents/document/primary%3ADocuments%2Fpqrypt")
-                fileManagerIntent.type = "vnd.android.document/directory"
-                try {
-                    startActivity(fileManagerIntent)
-                } catch (e2: Exception) {
-                    Toast.makeText(this, "Files saved to: ${outputDir.absolutePath}", Toast.LENGTH_LONG).show()
-                }
-            }
-        } catch (e: Exception) {
-            Toast.makeText(this, "Files are saved to: /storage/emulated/0/Documents/pqrypt/", Toast.LENGTH_LONG).show()
-        }
-    }
 
     override fun onDestroy() {
         super.onDestroy()
         try {
             unregisterReceiver(bluetoothReceiver)
-        } catch (_: Exception) {}
+        } catch (e: Exception) {
+            Log.e("Bluetooth", "Failed to unregister receiver", e)
+        }
         
         bluetoothSocket?.close()
         serverSocket?.close()

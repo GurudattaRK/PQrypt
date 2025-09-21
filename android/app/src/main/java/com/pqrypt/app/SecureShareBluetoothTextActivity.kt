@@ -19,6 +19,7 @@ import android.text.Editable
 import android.text.TextWatcher
 import android.view.View
 import android.widget.Toast
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
@@ -75,6 +76,18 @@ class SecureShareBluetoothTextActivity : AppCompatActivity() {
                     binding.tvStatus.text = "Discovery completed. Found ${discoveredDevices.size} devices"
                 }
             }
+        }
+    }
+
+    // Bluetooth enable launcher for Android 12+ compatibility
+    private val bluetoothEnableLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == Activity.RESULT_OK) {
+            Toast.makeText(this, "Bluetooth enabled", Toast.LENGTH_SHORT).show()
+            checkPermissions()
+        } else {
+            showError("Bluetooth is required for this feature")
         }
     }
 
@@ -148,6 +161,8 @@ class SecureShareBluetoothTextActivity : AppCompatActivity() {
 
         // Auto-setup Bluetooth on activity start
         setupBluetooth()
+        
+        // Setup bluetooth button removed from layout - everything is automatic now
 
         // Discover/Connect button
         binding.btnDiscoverConnect.setOnClickListener {
@@ -180,23 +195,46 @@ class SecureShareBluetoothTextActivity : AppCompatActivity() {
             return
         }
 
+        // Check permissions first, then enable Bluetooth if needed
+        checkPermissions()
+        
         if (!bluetoothAdapter!!.isEnabled) {
             val enableBtIntent = Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE)
-            startActivityForResult(enableBtIntent, REQUEST_ENABLE_BT)
+            bluetoothEnableLauncher.launch(enableBtIntent)
         }
     }
 
     private fun checkPermissions() {
         val permissions = mutableListOf<String>()
         
-        if (ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED) {
-            permissions.add(Manifest.permission.BLUETOOTH_CONNECT)
+        // Check Android version and add appropriate Bluetooth permissions
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
+            // Android 12+ (API 31+) - Use new granular Bluetooth permissions
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_SCAN) != PackageManager.PERMISSION_GRANTED) {
+                permissions.add(Manifest.permission.BLUETOOTH_SCAN)
+            }
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED) {
+                permissions.add(Manifest.permission.BLUETOOTH_CONNECT)
+            }
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_ADVERTISE) != PackageManager.PERMISSION_GRANTED) {
+                permissions.add(Manifest.permission.BLUETOOTH_ADVERTISE)
+            }
+        } else {
+            // Android 11 and below - Use legacy Bluetooth permissions
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH) != PackageManager.PERMISSION_GRANTED) {
+                permissions.add(Manifest.permission.BLUETOOTH)
+            }
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_ADMIN) != PackageManager.PERMISSION_GRANTED) {
+                permissions.add(Manifest.permission.BLUETOOTH_ADMIN)
+            }
         }
-        if (ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_SCAN) != PackageManager.PERMISSION_GRANTED) {
-            permissions.add(Manifest.permission.BLUETOOTH_SCAN)
-        }
+        
+        // Location permissions required for Bluetooth device discovery
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
             permissions.add(Manifest.permission.ACCESS_FINE_LOCATION)
+        }
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
+            permissions.add(Manifest.permission.ACCESS_COARSE_LOCATION)
         }
 
         if (permissions.isNotEmpty()) {

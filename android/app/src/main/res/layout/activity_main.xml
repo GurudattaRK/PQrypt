@@ -31,6 +31,18 @@
         android:layout_marginBottom="48dp" />
 
     <Button
+        android:id="@+id/btn_secure_share"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Secure Share"
+        android:textSize="18sp"
+        android:padding="16dp"
+        android:layout_marginBottom="16dp"
+        style="@style/Widget.Material3.Button"
+        android:backgroundTint="#9C27B0"
+        android:textColor="@android:color/white" />
+
+    <Button
         android:id="@+id/btn_file_encryption"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
@@ -52,18 +64,6 @@
         android:layout_marginBottom="16dp"
         style="@style/Widget.Material3.Button"
         android:backgroundTint="#00AF00"
-        android:textColor="@android:color/white" />
-
-    <Button
-        android:id="@+id/btn_secure_share"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:text="Secure Share"
-        android:textSize="18sp"
-        android:padding="16dp"
-        android:layout_marginBottom="16dp"
-        style="@style/Widget.Material3.Button"
-        android:backgroundTint="#9C27B0"
         android:textColor="@android:color/white" />
 
     <Button
