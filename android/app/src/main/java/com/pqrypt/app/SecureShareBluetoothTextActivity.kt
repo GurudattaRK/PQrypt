@@ -121,14 +121,14 @@ class SecureShareBluetoothTextActivity : AppCompatActivity() {
         try {
             // Create default output directory: Documents/pqrypt/
             val documentsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS)
-            defaultOutputDir = File(documentsDir, "pqrypt")
+            defaultOutputDir = File(documentsDir, "PQrypt")
             
             if (!defaultOutputDir!!.exists()) {
                 defaultOutputDir!!.mkdirs()
             }
         } catch (e: Exception) {
             // Fallback to the same default path, not app-specific directory
-            defaultOutputDir = File("/storage/emulated/0/Documents/pqrypt")
+            defaultOutputDir = File("/storage/emulated/0/Documents/PQrypt")
             if (!defaultOutputDir!!.exists()) {
                 defaultOutputDir!!.mkdirs()
             }
@@ -819,7 +819,7 @@ class SecureShareBluetoothTextActivity : AppCompatActivity() {
             }
             
             // Write encrypted data to temp file
-            val outputDir = defaultOutputDir ?: File("/storage/emulated/0/Documents/pqrypt")
+            val outputDir = defaultOutputDir ?: File("/storage/emulated/0/Documents/PQrypt")
             if (!outputDir.exists()) {
                 outputDir.mkdirs()
             }
@@ -903,7 +903,7 @@ class SecureShareBluetoothTextActivity : AppCompatActivity() {
     
     private fun cleanupIntermediateFiles() {
         try {
-            val outputDir = File("/storage/emulated/0/Documents/pqrypt")
+            val outputDir = File("/storage/emulated/0/Documents/PQrypt")
             if (outputDir.exists()) {
                 // Delete all .key files
                 outputDir.listFiles { _, name -> name.endsWith(".key") }?.forEach { it.delete() }
@@ -960,7 +960,7 @@ class SecureShareBluetoothTextActivity : AppCompatActivity() {
                 }
             }
         } catch (e: Exception) {
-            Toast.makeText(this, "Files are saved to: /storage/emulated/0/Documents/pqrypt/", Toast.LENGTH_LONG).show()
+            Toast.makeText(this, "Files are saved to: /storage/emulated/0/Documents/PQrypt/", Toast.LENGTH_LONG).show()
         }
     }
 

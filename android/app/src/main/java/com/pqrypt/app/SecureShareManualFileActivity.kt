@@ -292,6 +292,21 @@ class SecureShareManualFileActivity : AppCompatActivity() {
                             }
                         }
                     }
+                    
+                    // Receiver opening encrypted file -> auto-decrypt
+                    !isSender && currentStep == 3 -> {
+                        if (finalSharedSecret == null) {
+                            withContext(Dispatchers.Main) {
+                                showError("No decryption key available. Please complete previous steps.")
+                            }
+                            return@launch
+                        }
+                        
+                        // Perform decryption with the selected encrypted file
+                        withContext(Dispatchers.Main) {
+                            performFileDecryption(uri)
+                        }
+                    }
                 }
             } catch (e: Exception) {
                 withContext(Dispatchers.Main) {
@@ -317,8 +332,9 @@ class SecureShareManualFileActivity : AppCompatActivity() {
                     return@launch
                 }
 
-                val originalFile = File(inputPath)
-                val encryptedFileName = "${originalFile.nameWithoutExtension}.encrypted"
+                // Use the selectedFilePath which contains the correct original filename
+                val originalFileName = selectedFilePath
+                val encryptedFileName = "${originalFileName}.pqrypt2"
                 
                 val outputFile = File.createTempFile("encrypted_", ".tmp", cacheDir)
                 
@@ -374,13 +390,14 @@ class SecureShareManualFileActivity : AppCompatActivity() {
                     return@launch
                 }
 
-                val fileName = File(inputPath).name
-                val outputName = if (fileName.endsWith(".encrypted")) {
-                    fileName.removeSuffix(".encrypted")
-                } else if (fileName.endsWith(".pqrypt2")) {
+                // Get the original filename from the URI instead of the temp file path
+                val fileName = getFileName(uri) ?: "decrypted_file"
+                val outputName = if (fileName.endsWith(".pqrypt2")) {
                     fileName.removeSuffix(".pqrypt2")
+                } else if (fileName.endsWith(".encrypted")) {
+                    fileName.removeSuffix(".encrypted")
                 } else {
-                    "${fileName}.decrypted"
+                    fileName  // Keep original name without adding .decrypted
                 }
                 
                 val outputFile = File.createTempFile("decrypted_", ".tmp", cacheDir)
