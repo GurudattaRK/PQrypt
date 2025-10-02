@@ -1,12 +1,10 @@
-// Symmetric cryptography implementations
-
 use argon2::{Argon2, Algorithm, Version, Params};
 use serpent::{Serpent, cipher::{BlockEncrypt, BlockDecrypt}};
 use serpent::cipher::generic_array::GenericArray;
 
 use super::constants_errors::*;
 
-//MARK: Argon2ID with configurable parameters
+// MARK: argon2id_hash
 #[inline]
 pub fn argon2id_hash(
     password: &[u8],
@@ -32,7 +30,7 @@ pub fn argon2id_hash(
     Ok(hash_output)
 }
 
-//MARK: Secure Serpent encryption
+// MARK: serpent_encrypt_inplace
 #[inline(always)]
 pub fn serpent_encrypt_inplace(
     cipher: &Serpent,
@@ -42,6 +40,7 @@ pub fn serpent_encrypt_inplace(
     cipher.encrypt_block(block_ga);
 }
 
+// MARK: serpent_decrypt_inplace
 #[inline(always)]
 pub fn serpent_decrypt_inplace(
     cipher: &Serpent,
@@ -50,6 +49,3 @@ pub fn serpent_decrypt_inplace(
     let block_ga = GenericArray::from_mut_slice(block);
     cipher.decrypt_block(block_ga);
 }
-
-//MARK: 1024-bit encryption with error handling
-// No longer used: the custom 1024-bit cipher has been replaced by Threefish-1024

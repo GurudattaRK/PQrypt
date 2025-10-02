@@ -7,12 +7,12 @@ use zeroize::Zeroize;
 
 use super::constants_errors::*;
 
-// Secure random number generation
+// MARK: secure_random_bytes
 pub fn secure_random_bytes(buf: &mut [u8]) -> Result<(), CryptoError> {
     getrandom(buf).map_err(|_| CryptoError::RandomGenerationFailed)
 }
 
-// Generate deterministic salt for password generation using Argon2
+// MARK: derive_password_salt
 pub fn derive_password_salt(user_id: &str) -> Result<[u8; ARGON2_SALT_SIZE], CryptoError> {
     if user_id.is_empty() {
         return Err(CryptoError::InvalidInput);
@@ -37,16 +37,17 @@ pub fn derive_password_salt(user_id: &str) -> Result<[u8; ARGON2_SALT_SIZE], Cry
 
 
 
-// Checked integer operations to prevent overflow
+// MARK: checked_add_usize
 pub fn checked_add_usize(a: usize, b: usize) -> Result<usize, CryptoError> {
     a.checked_add(b).ok_or(CryptoError::IntegerOverflow)
 }
 
+// MARK: checked_mul_usize
 pub fn checked_mul_usize(a: usize, b: usize) -> Result<usize, CryptoError> {
     a.checked_mul(b).ok_or(CryptoError::IntegerOverflow)
 }
 
-// Secure padding calculation with overflow protection
+// MARK: calculate_padded_length
 pub fn calculate_padded_length(input_len: usize) -> Result<usize, CryptoError> {
     if input_len == 0 {
         return Ok(CHUNK_SIZE);
@@ -55,19 +56,16 @@ pub fn calculate_padded_length(input_len: usize) -> Result<usize, CryptoError> {
     // Add memory limit check - prevent processing files larger than 128MB in one go
     const MAX_SINGLE_PASS_SIZE: usize = 128 * 1024 * 1024; // 128MB
     if input_len > MAX_SINGLE_PASS_SIZE {
-        eprintln!("DEBUG: File too large for single pass: {} bytes > {} bytes", input_len, MAX_SINGLE_PASS_SIZE);
-        eprintln!("DEBUG: Consider implementing chunked processing for files this large");
         return Err(CryptoError::InvalidInput);
     }
     
-    let chunks_needed = (input_len + CHUNK_SIZE - 1) / CHUNK_SIZE; // Ceiling division
+    let chunks_needed = (input_len + CHUNK_SIZE - 1) / CHUNK_SIZE;
     let padded_len = checked_mul_usize(chunks_needed, CHUNK_SIZE)?;
     
-    eprintln!("DEBUG: calculate_padded_length: input={}, chunks={}, padded={}", input_len, chunks_needed, padded_len);
     Ok(padded_len)
 }
 
-// Helper function: bytes to u32 array with validation
+// MARK: bytes_to_u32_array
 pub fn bytes_to_u32_array(bytes: &[u8]) -> Result<[u32; 32], CryptoError> {
     if bytes.len() < 128 {
         return Err(CryptoError::InvalidInput);
@@ -86,7 +84,7 @@ pub fn bytes_to_u32_array(bytes: &[u8]) -> Result<[u32; 32], CryptoError> {
     Ok(result)
 }
 
-// Helper function: u32 array to bytes
+// MARK: u32_array_to_bytes
 pub fn u32_array_to_bytes(data: &[u32; 32]) -> [u8; 128] {
     let mut result = [0u8; 128];
     for i in 0..32 {
@@ -99,7 +97,7 @@ pub fn u32_array_to_bytes(data: &[u32; 32]) -> [u8; 128] {
     result
 }
 
-// Secure key encryption using AES-GCM
+// MARK: encrypt_key_with_shared_secret
 pub fn encrypt_key_with_shared_secret(
     key_data: &[u8],
     shared_secret: &[u8]
@@ -134,7 +132,7 @@ pub fn encrypt_key_with_shared_secret(
     Ok(result)
 }
 
-// Secure key decryption using AES-GCM
+// MARK: decrypt_key_with_shared_secret
 pub fn decrypt_key_with_shared_secret(
     encrypted_data: &[u8],
     shared_secret: &[u8]

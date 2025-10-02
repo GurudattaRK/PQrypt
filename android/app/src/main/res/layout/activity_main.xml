@@ -8,6 +8,7 @@
     android:orientation="vertical"
     android:padding="24dp"
     android:gravity="center"
+    android:background="?android:attr/colorBackground"
     tools:context=".MainActivity">
 
     <Button
@@ -19,15 +20,22 @@
         android:layout_marginBottom="8dp"
         android:backgroundTint="#FF9800"
         android:text="Help?"
-        android:textColor="@android:color/white"
-        android:textSize="16sp" />
+        android:textAppearance="@style/TextAppearance.PQrypt.Button"
+        android:textColor="@android:color/white" />
+
+    <!-- App Logo -->
+    <ImageView
+        android:layout_width="120dp"
+        android:layout_height="120dp"
+        android:layout_marginBottom="16dp"
+        android:src="@drawable/logo"
+        android:contentDescription="PQrypt Logo" />
 
     <TextView
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:text="PQrypt ⚛️"
-        android:textSize="32sp"
-        android:textStyle="bold"
+        android:text="PQrypt"
+        android:textAppearance="@style/TextAppearance.PQrypt.Headline"
         android:layout_marginBottom="48dp" />
 
     <Button
@@ -35,7 +43,7 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:text="Secure Share"
-        android:textSize="18sp"
+        android:textAppearance="@style/TextAppearance.PQrypt.Button"
         android:padding="16dp"
         android:layout_marginBottom="16dp"
         style="@style/Widget.Material3.Button"
@@ -47,7 +55,7 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:text="File Encryption"
-        android:textSize="18sp"
+        android:textAppearance="@style/TextAppearance.PQrypt.Button"
         android:padding="16dp"
         android:layout_marginBottom="16dp"
         style="@style/Widget.Material3.Button"
@@ -59,7 +67,7 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:text="PQC Key Exchange"
-        android:textSize="18sp"
+        android:textAppearance="@style/TextAppearance.PQrypt.Button"
         android:padding="16dp"
         android:layout_marginBottom="16dp"
         style="@style/Widget.Material3.Button"
@@ -71,7 +79,7 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:text="Password Generator"
-        android:textSize="18sp"
+        android:textAppearance="@style/TextAppearance.PQrypt.Button"
         android:padding="16dp"
         style="@style/Widget.Material3.Button"
         android:backgroundTint="#00B0F0"

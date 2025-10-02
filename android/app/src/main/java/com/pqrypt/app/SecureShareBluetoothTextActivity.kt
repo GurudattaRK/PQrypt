@@ -102,6 +102,7 @@ class SecureShareBluetoothTextActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        
         binding = ActivitySecureShareBluetoothTextBinding.inflate(layoutInflater)
         setContentView(binding.root)
 

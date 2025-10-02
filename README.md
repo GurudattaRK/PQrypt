@@ -209,7 +209,7 @@ cd android
 
 ## 🔒 Security Features
 
-- **Post-Quantum Cryptography**: Implements FIPS 203 (ML-KEM) and FIPS 205 (ML-DSA)
+- **Post-Quantum Cryptography**: Implements FIPS 203 (ML-KEM), HQC-256 (Hamming Quasi-Cyclic), and FIPS 205 (ML-DSA)
 - **Hybrid Encryption**: Combines classical and post-quantum algorithms
 - **Key Derivation**: Argon2 for secure password-based key generation
 - **Memory Safety**: Rust's memory safety prevents buffer overflows
@@ -219,26 +219,26 @@ cd android
 
 ```
 PQrypt/
-├── desktop/               # Desktop application (Rust + Slint)
+├── desktop/                 # Desktop application (Rust + Slint)
 │   ├── src/
-│   │   ├── main.rs        # Desktop main entry point
-│   │   ├── lib.rs         # Shared cryptographic library
-│   │   └── rusty_api/     # Core crypto implementations
+│   │   ├── main.rs          # Desktop main entry point
+│   │   ├── lib.rs           # Shared cryptographic library
+│   │   └── rusty_api/       # Core crypto implementations
 │   ├── ui/
-│   │   └── main.slint     # UI definition
-│   └── Cargo.toml        # Rust dependencies
+│   │   └── main.slint       # UI definition
+│   └── Cargo.toml           # Rust dependencies
 │
-├── android/               # Android application
+├── android/                 # Android application
 │   ├── app/
 │   │   ├── src/main/
-│   │   │   ├── java/      # Kotlin/Java source
-│   │   │   ├── cpp/       # JNI C++ bridge
-│   │   │   ├── rust/      # Rust cryptographic backend
-│   │   │   └── res/       # Android resources
+│   │   │   ├── java/        # Kotlin/Java source
+│   │   │   ├── cpp/         # JNI C++ bridge
+│   │   │   ├── rust/        # Rust cryptographic backend
+│   │   │   └── res/         # Android resources
 │   │   └── build.gradle.kts
-│   └── build.gradle.kts   # Android build configuration
+│   └── build.gradle.kts     # Android build configuration
 │
-└── README.md              # This file
+└── README.md                # This file
 ```
 
 ## 🤝 Contributing

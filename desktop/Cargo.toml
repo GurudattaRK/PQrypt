@@ -48,6 +48,7 @@ fips205 = "0.4"
 threefish = "0.5.2"
 cipher = "0.4"
 
+
 [build-dependencies]
 slint-build = "1.8"
 

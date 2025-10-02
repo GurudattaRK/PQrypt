@@ -4,13 +4,11 @@
 pub mod rusty_api;
 pub mod c_ffi;
 
-// Re-export for easier access
 pub use rusty_api::*;
 pub use c_ffi::*;
 
-// Custom random number generator for Android
+// MARK: android_getrandom
 pub fn android_getrandom(buf: &mut [u8]) -> Result<(), getrandom::Error> {
-    // Use /dev/urandom for Android
     use std::fs::File;
     use std::io::Read;
     

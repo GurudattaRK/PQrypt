@@ -15,6 +15,7 @@ class MainActivity : AppCompatActivity() {
 
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
+        
 
         // Help button opens help screen
         binding.btnHelp.setOnClickListener {

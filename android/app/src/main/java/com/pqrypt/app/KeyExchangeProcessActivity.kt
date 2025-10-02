@@ -91,8 +91,9 @@ class KeyExchangeProcessActivity : AppCompatActivity() { // Guided UI for 3-mess
         }
     }
 
-    override fun onCreate(savedInstanceState: Bundle?) { // Activity entry point
+    override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        
         binding = ActivityKeyExchangeProcessBinding.inflate(layoutInflater) // Inflate binding
         setContentView(binding.root) // Attach layout
 

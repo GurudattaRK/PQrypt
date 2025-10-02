@@ -139,10 +139,6 @@ class SecureShareManualFileActivity : AppCompatActivity() {
             }
         }
 
-        // Hide other step buttons
-        binding.btnStep2.visibility = View.GONE
-        binding.btnStep3.visibility = View.GONE
-        binding.btnStep4.visibility = View.GONE
 
         // Output folder button removed - users already know where they saved files
 
@@ -261,8 +257,8 @@ class SecureShareManualFileActivity : AppCompatActivity() {
                         withContext(Dispatchers.Main) {
                             queueSaveAndPersist("3.key", result3Key, "3.key generated")
                             queueSaveAndPersist("final.key", finalSharedSecret!!, "final.key generated")
-                            binding.tvStep2Result.text = "Keys generated - Auto-encrypting file..."
-                            binding.tvStep2Result.visibility = View.VISIBLE
+                            binding.tvStep1Result.text = "Keys generated - Auto-encrypting file..."
+                            binding.tvStep1Result.visibility = View.VISIBLE
                             
                             // Auto-encrypt file
                             performFileEncryption()
@@ -283,8 +279,8 @@ class SecureShareManualFileActivity : AppCompatActivity() {
                         withContext(Dispatchers.Main) {
                             if (finalSharedSecret != null && finalSharedSecret!!.isNotEmpty()) {
                                 queueSaveAndPersist("final.key", finalSharedSecret!!, "final.key generated - Ready to decrypt")
-                                binding.tvStep2Result.text = "final.key auto-generated - Ready to decrypt"
-                                binding.tvStep2Result.visibility = View.VISIBLE
+                                binding.tvStep1Result.text = "final.key auto-generated - Ready to decrypt"
+                                binding.tvStep1Result.visibility = View.VISIBLE
                                 currentStep = 3
                                 updateUI()
                             } else {
@@ -352,10 +348,11 @@ class SecureShareManualFileActivity : AppCompatActivity() {
 
                 if (success == 0) {
                     val encryptedBytes = outputFile.readBytes()
+                    val outputPath = outputFile.absolutePath
                     withContext(Dispatchers.Main) {
                         queueSaveAndPersist(encryptedFileName, encryptedBytes, "File encrypted successfully!")
-                        binding.tvStep3Result.text = "File auto-encrypted!"
-                        binding.tvStep3Result.visibility = View.VISIBLE
+                        binding.tvStep1Result.text = "File encrypted: $outputPath"
+                        binding.tvStep1Result.visibility = View.VISIBLE
                         currentStep = 4
                         updateUI()
                     }
@@ -405,7 +402,7 @@ class SecureShareManualFileActivity : AppCompatActivity() {
                 val inputFd = ParcelFileDescriptor.open(File(inputPath), ParcelFileDescriptor.MODE_READ_ONLY)
                 val outputFd = ParcelFileDescriptor.open(outputFile, ParcelFileDescriptor.MODE_CREATE or ParcelFileDescriptor.MODE_WRITE_ONLY)
 
-                val success = try {
+                val result = try {
                     RustyCrypto.tripleDecryptFd(finalSharedSecret!!, false, inputFd.fd, outputFd.fd)
                 } catch (e: Exception) {
                     -1
@@ -414,18 +411,25 @@ class SecureShareManualFileActivity : AppCompatActivity() {
                     outputFd.close()
                 }
 
-                if (success == 0) {
+                if (result == 0) {
                     val decryptedBytes = outputFile.readBytes()
+                    val outputPath = outputFile.absolutePath
                     withContext(Dispatchers.Main) {
                         queueSaveAndPersist(outputName, decryptedBytes, "File decrypted successfully!")
-                        binding.tvStep3Result.text = "File auto-decrypted!"
-                        binding.tvStep3Result.visibility = View.VISIBLE
+                        binding.tvStep1Result.text = "File decrypted: $outputPath"
+                        binding.tvStep1Result.visibility = View.VISIBLE
                         currentStep = 4
                         updateUI()
                     }
                 } else {
                     withContext(Dispatchers.Main) {
-                        showError("File decryption failed")
+                        val errorMessage = when (result) {
+                            RustyCrypto.CRYPTO_ERROR_DECRYPTION_FAILED -> "Authentication/decryption failed. This may be due to file corruption, tampering, or wrong file selection."
+                            RustyCrypto.CRYPTO_ERROR_INVALID_INPUT -> "Invalid encrypted file. The file may be corrupted or not a valid encrypted file."
+                            RustyCrypto.CRYPTO_ERROR_NULL_POINTER -> "File access error. Please check file permissions."
+                            else -> "File decryption failed. This may be due to file corruption, tampering, or wrong file selection."
+                        }
+                        showError(errorMessage)
                     }
                 }
                 

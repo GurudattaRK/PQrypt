@@ -120,10 +120,6 @@ class SecureShareManualTextActivity : AppCompatActivity() {
             }
         }
 
-        // Hide other step buttons
-        binding.btnStep2.visibility = View.GONE
-        binding.btnStep3.visibility = View.GONE
-        binding.btnStep4.visibility = View.GONE
 
         // Output folder button removed - users already know where they saved files
 
@@ -247,8 +243,8 @@ class SecureShareManualTextActivity : AppCompatActivity() {
                         withContext(Dispatchers.Main) {
                             saveKeyFile(result3Key, "3.key")
                             saveKeyFile(finalSharedSecret!!, "final.key")
-                            binding.tvStep2Result.text = "Keys generated - Auto-encrypting text..."
-                            binding.tvStep2Result.visibility = View.VISIBLE
+                            binding.tvStep1Result.text = "Keys generated - Auto-encrypting text..."
+                            binding.tvStep1Result.visibility = View.VISIBLE
                             
                             // Auto-encrypt text
                             performTextEncryption()
@@ -269,8 +265,8 @@ class SecureShareManualTextActivity : AppCompatActivity() {
                         withContext(Dispatchers.Main) {
                             if (finalSharedSecret != null && finalSharedSecret!!.isNotEmpty()) {
                                 saveKeyFile(finalSharedSecret!!, "final.key")
-                                binding.tvStep2Result.text = "final.key auto-generated - Ready to decrypt"
-                                binding.tvStep2Result.visibility = View.VISIBLE
+                                binding.tvStep1Result.text = "final.key auto-generated - Ready to decrypt"
+                                binding.tvStep1Result.visibility = View.VISIBLE
                                 currentStep = 3
                                 updateUI()
                             } else {
@@ -332,8 +328,8 @@ class SecureShareManualTextActivity : AppCompatActivity() {
                     
                     withContext(Dispatchers.Main) {
                         saveKeyFile(encryptedBytes, "text.encrypted")
-                        binding.tvStep3Result.text = "Text auto-encrypted!"
-                        binding.tvStep3Result.visibility = View.VISIBLE
+                        binding.tvStep1Result.text = "Text encrypted and saved"
+                        binding.tvStep1Result.visibility = View.VISIBLE
                         currentStep = 4
                         updateUI()
                     }
@@ -386,8 +382,8 @@ class SecureShareManualTextActivity : AppCompatActivity() {
                     withContext(Dispatchers.Main) {
                         // Display decrypted text
                         binding.tvDecryptedText.text = decryptedText
-                        binding.tvStep3Result.text = "Text auto-decrypted!"
-                        binding.tvStep3Result.visibility = View.VISIBLE
+                        binding.tvStep1Result.text = "Text decrypted successfully!"
+                        binding.tvStep1Result.visibility = View.VISIBLE
                         
                         // Also save to file
                         saveKeyFile(decryptedBytes, "text_decrypted.txt")
@@ -396,7 +392,13 @@ class SecureShareManualTextActivity : AppCompatActivity() {
                     }
                 } else {
                     withContext(Dispatchers.Main) {
-                        showError("Text decryption failed")
+                        val errorMessage = when (success) {
+                            RustyCrypto.CRYPTO_ERROR_DECRYPTION_FAILED -> "Authentication/decryption failed. This may be due to file corruption, tampering, or wrong file selection."
+                            RustyCrypto.CRYPTO_ERROR_INVALID_INPUT -> "Invalid encrypted file. The file may be corrupted or not a valid encrypted text."
+                            RustyCrypto.CRYPTO_ERROR_NULL_POINTER -> "File access error. Please check file permissions."
+                            else -> "Text decryption failed. This may be due to file corruption, tampering, or wrong file selection."
+                        }
+                        showError(errorMessage)
                     }
                 }
                 

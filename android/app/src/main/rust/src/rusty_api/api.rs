@@ -8,9 +8,6 @@ use cipher::generic_array::GenericArray as Ga;
 use ctr::Ctr128BE;
 use ghash::{GHash, Block};
 use universal_hash::UniversalHash;
-use std::time::{Duration, Instant};
-use log::debug;
-//
 use super::constants_errors::*;
 use super::utils::*;
 use super::symmetric::*;
@@ -23,8 +20,6 @@ use std::os::raw::c_int;
 use libc;
 use subtle::ConstantTimeEq;
 
-// Debug file logging disabled in release builds
-
 // =============================
 // PQRYPT2 single-tag streaming
 // =============================
@@ -33,10 +28,10 @@ const IO_BUF_SIZE: usize = 128 * 1024; // 128 KiB IO buffer
 const HEADER_MAGIC: &[u8; 8] = b"PQRYPT2\0"; // 8-byte magic (binary header)
 const HEADER_VERSION: u8 = 1;
 
-// Flags bitmask
-const FLAG_SINGLE_TAG: u8 = 0b0000_0001;      // One GCM tag for entire file
-const FLAG_TRAILER_LEN: u8 = 0b0000_0010;     // u64 original length is in trailer
+const FLAG_SINGLE_TAG: u8 = 0b0000_0001;
+const FLAG_TRAILER_LEN: u8 = 0b0000_0010;
 
+// MARK: build_header
 #[inline]
 fn build_header(
     salt: &[u8; 32],
@@ -58,6 +53,7 @@ fn build_header(
     header
 }
 
+// MARK: derive_file_keys_from_secret
 #[inline]
 fn derive_file_keys_from_secret(
     secret: &[u8],
@@ -85,9 +81,9 @@ fn derive_file_keys_from_secret(
     Ok(TripleCipherKeys { aes_key, serpent_key, tf_key_128, serpent_iv, threefish_iv })
 }
 
+// MARK: aes_gcm_subkey_h
 #[inline]
 fn aes_gcm_subkey_h(aes_key: &[u8; 32]) -> [u8; 16] {
-    // H = E(K, 0^128)
     let cipher = Aes256::new(Ga::from_slice(aes_key));
     let mut block = [0u8; 16];
     let mut ga = Ga::from_mut_slice(&mut block);
@@ -95,6 +91,7 @@ fn aes_gcm_subkey_h(aes_key: &[u8; 32]) -> [u8; 16] {
     block
 }
 
+// MARK: gcm_encryptor_init
 #[inline]
 fn gcm_encryptor_init(
     aes_key: &[u8; 32],
@@ -123,6 +120,7 @@ fn gcm_encryptor_init(
     (ctr, h, ek_j0)
 }
 
+// MARK: ghash_update_blocks
 #[inline]
 fn ghash_update_blocks(gh: &mut GHash, buf: &[u8]) {
     debug_assert!(buf.len() % 16 == 0);
@@ -132,6 +130,7 @@ fn ghash_update_blocks(gh: &mut GHash, buf: &[u8]) {
     }
 }
 
+// MARK: ghash_append_lengths
 #[inline]
 fn ghash_append_lengths(gh: &mut GHash, aad_len: usize, ct_len: usize) {
     let mut len_block = [0u8; 16];
@@ -145,13 +144,12 @@ fn ghash_append_lengths(gh: &mut GHash, aad_len: usize, ct_len: usize) {
 
 
 
-// Cached keys structure for performance with CBC IVs
 struct TripleCipherKeys {
     aes_key: [u8; 32],
     serpent_key: [u8; 32],
     tf_key_128: [u8; 128],
-    serpent_iv: [u8; 16],    // IV for Serpent CBC
-    threefish_iv: [u8; 128], // IV for Threefish CBC
+    serpent_iv: [u8; 16],
+    threefish_iv: [u8; 128],
 }
 
 impl Zeroize for TripleCipherKeys {
@@ -165,6 +163,7 @@ impl Zeroize for TripleCipherKeys {
 }
 
 impl TripleCipherKeys {
+    // MARK: derive_from_master
     #[inline]
     fn derive_from_master(master_key: &[u8; 128]) -> Result<Self, CryptoError> {
         // Argon2 derivation to 336 bytes (128 + 32 + 32 + 16 + 128) for keys + IVs
@@ -193,14 +192,9 @@ impl TripleCipherKeys {
     }
 }
 
-// CBC mode encryption for triple cipher (128-byte chunks)
+// MARK: triple_encrypt_chunk_inplace_cbc
 #[inline(always)]
 fn triple_encrypt_chunk_inplace_cbc(chunk: &mut [u8; CHUNK_SIZE], keys: &TripleCipherKeys, threefish_prev: &mut [u8; 128], serpent_prev: &mut [u8; 16]) -> Result<(), CryptoError> {
-    use log::debug;
-    
-    // Log first 16 bytes before encryption
-    debug!("ENCRYPT: Before Threefish CBC: {:02x?}", &chunk[..16]);
-    
     // Threefish-1024 CBC: XOR with previous block, then encrypt
     for i in 0..CHUNK_SIZE {
         chunk[i] ^= threefish_prev[i];
@@ -210,26 +204,21 @@ fn triple_encrypt_chunk_inplace_cbc(chunk: &mut [u8; CHUNK_SIZE], keys: &TripleC
     cipher.encrypt_block(block_ga);
     threefish_prev.copy_from_slice(chunk); // Update previous block for next iteration
     
-    debug!("ENCRYPT: After Threefish CBC: {:02x?}", &chunk[..16]);
-    
     // Serpent CBC encryption - process 8 blocks of 16 bytes each
     serpent_encrypt_8blocks_cbc(chunk, &keys.serpent_key, serpent_prev)?;
-    
-    debug!("ENCRYPT: After Serpent CBC: {:02x?}", &chunk[..16]);
     
     Ok(())
 }
 
-// Legacy ECB function for compatibility (if needed)
+// MARK: triple_encrypt_chunk_inplace
 #[inline(always)]
 fn triple_encrypt_chunk_inplace(chunk: &mut [u8; CHUNK_SIZE], keys: &TripleCipherKeys) -> Result<(), CryptoError> {
-    // Initialize CBC state with IVs
     let mut threefish_prev = keys.threefish_iv;
     let mut serpent_prev = keys.serpent_iv;
     triple_encrypt_chunk_inplace_cbc(chunk, keys, &mut threefish_prev, &mut serpent_prev)
 }
 
-// Serpent CBC encryption for 8 blocks (128 bytes)
+// MARK: serpent_encrypt_8blocks_cbc
 #[inline(always)]
 fn serpent_encrypt_8blocks_cbc(data: &mut [u8; CHUNK_SIZE], key: &[u8; 32], prev_block: &mut [u8; 16]) -> Result<(), CryptoError> {
     use serpent::{Serpent, cipher::KeyInit};
@@ -259,7 +248,7 @@ fn serpent_encrypt_8blocks_cbc(data: &mut [u8; CHUNK_SIZE], key: &[u8; 32], prev
     Ok(())
 }
 
-// Legacy ECB function for compatibility (if needed)
+// MARK: serpent_encrypt_8blocks
 #[inline(always)]
 fn serpent_encrypt_8blocks(data: &mut [u8; CHUNK_SIZE], key: &[u8; 32]) -> Result<(), CryptoError> {
     use serpent::{Serpent, cipher::KeyInit};
@@ -280,21 +269,13 @@ fn serpent_encrypt_8blocks(data: &mut [u8; CHUNK_SIZE], key: &[u8; 32]) -> Resul
     Ok(())
 }
 
-// CBC mode decryption for triple cipher (128-byte chunks)
+// MARK: triple_decrypt_chunk_inplace_cbc
 #[inline(always)]
 fn triple_decrypt_chunk_inplace_cbc(chunk: &mut [u8; CHUNK_SIZE], keys: &TripleCipherKeys, threefish_prev: &mut [u8; 128], serpent_prev: &mut [u8; 16]) -> Result<(), CryptoError> {
-    use log::debug;
-    
-    // Log first 16 bytes before decryption
-    debug!("DECRYPT: Before Serpent CBC: {:02x?}", &chunk[..16]);
-    
-    // Store original ciphertext for CBC
     let _serpent_ct_backup = chunk.clone();
     
     // Serpent CBC decryption - process 8 blocks of 16 bytes each
     serpent_decrypt_8blocks_cbc(chunk, &keys.serpent_key, serpent_prev)?;
-    
-    debug!("DECRYPT: After Serpent CBC: {:02x?}", &chunk[..16]);
     
     // Store ciphertext for Threefish CBC
     let threefish_ct_backup = chunk.clone();
@@ -310,21 +291,18 @@ fn triple_decrypt_chunk_inplace_cbc(chunk: &mut [u8; CHUNK_SIZE], keys: &TripleC
     }
     threefish_prev.copy_from_slice(&threefish_ct_backup); // Update for next iteration
     
-    debug!("DECRYPT: After Threefish CBC: {:02x?}", &chunk[..16]);
-    
     Ok(())
 }
 
-// Legacy ECB function for compatibility (if needed)
+// MARK: triple_decrypt_chunk_inplace
 #[inline(always)]
 fn triple_decrypt_chunk_inplace(chunk: &mut [u8; CHUNK_SIZE], keys: &TripleCipherKeys) -> Result<(), CryptoError> {
-    // Initialize CBC state with IVs
     let mut threefish_prev = keys.threefish_iv;
     let mut serpent_prev = keys.serpent_iv;
     triple_decrypt_chunk_inplace_cbc(chunk, keys, &mut threefish_prev, &mut serpent_prev)
 }
 
-// Serpent CBC decryption for 8 blocks (128 bytes)
+// MARK: serpent_decrypt_8blocks_cbc
 #[inline(always)]
 fn serpent_decrypt_8blocks_cbc(data: &mut [u8; CHUNK_SIZE], key: &[u8; 32], prev_block: &mut [u8; 16]) -> Result<(), CryptoError> {
     use serpent::{Serpent, cipher::KeyInit};
@@ -357,7 +335,7 @@ fn serpent_decrypt_8blocks_cbc(data: &mut [u8; CHUNK_SIZE], key: &[u8; 32], prev
     Ok(())
 }
 
-// Legacy ECB function for compatibility (if needed)
+// MARK: serpent_decrypt_8blocks
 #[inline(always)]
 fn serpent_decrypt_8blocks(data: &mut [u8; CHUNK_SIZE], key: &[u8; 32]) -> Result<(), CryptoError> {
     use serpent::{Serpent, cipher::KeyInit};
@@ -378,62 +356,32 @@ fn serpent_decrypt_8blocks(data: &mut [u8; CHUNK_SIZE], key: &[u8; 32]) -> Resul
     Ok(())
 }
 
-//MARK: Ultra-optimized block-by-block triple encryption
+// MARK: triple_encrypt
 #[inline]
 pub fn triple_encrypt(master_key: &[u8; 128], plaintext: &[u8]) -> Result<Vec<u8>, CryptoError> {
-    let start_time = Instant::now();
-    eprintln!("DEBUG: triple_encrypt called with plaintext len: {}", plaintext.len());
-    
-    // Derive keys once and cache them
-    let key_derive_time = Instant::now();
-    eprintln!("DEBUG: Deriving keys from master key");
     let mut keys = TripleCipherKeys::derive_from_master(master_key)?;
-    println!("[ENCRYPT] Key derivation: {:.2?}", key_derive_time.elapsed());
     
     // Calculate padded length with overflow protection
-    eprintln!("DEBUG: Calculating padded length");
     let padded_len = calculate_padded_length(plaintext.len())?;
-    eprintln!("DEBUG: Padded length: {}", padded_len);
     
     // Block-by-block processing for memory efficiency (optimized - minimize allocations)
-    let cipher_time = Instant::now();
-    eprintln!("DEBUG: Creating processed vector with capacity: {}", padded_len);
     let mut processed = Vec::with_capacity(padded_len);
     processed.extend_from_slice(plaintext);
     processed.resize(padded_len, 0); // Pad with zeros
-    eprintln!("DEBUG: Processed vector created, actual len: {}", processed.len());
     
-    let mut threefish_total = Duration::new(0, 0);
-    let mut serpent_total = Duration::new(0, 0);
-    
-    eprintln!("DEBUG: Starting chunk processing, {} chunks", processed.len() / CHUNK_SIZE);
     // Process in-place by chunks for maximum memory efficiency
     let tf_cipher = Threefish1024::new(&keys.tf_key_128.into());
-    for (i, chunk) in processed.chunks_mut(CHUNK_SIZE).enumerate() {
-        eprintln!("DEBUG: Processing chunk {}, chunk len: {}", i, chunk.len());
+    for chunk in processed.chunks_mut(CHUNK_SIZE) {
         let chunk_array: &mut [u8; CHUNK_SIZE] = chunk.try_into()
             .map_err(|_| CryptoError::InvalidInput)?;
         
-        // Time individual cipher operations
-        let threefish_start = Instant::now();
-        eprintln!("DEBUG: Processing chunk {} with Threefish-1024", i);
         let block_ga: &mut GenericArray<u8, U128> = GenericArray::from_mut_slice(chunk_array);
         tf_cipher.encrypt_block(block_ga);
-        threefish_total += threefish_start.elapsed();
         
-        let serpent_start = Instant::now();
-        eprintln!("DEBUG: Processing chunk {} with serpent cipher", i);
         serpent_encrypt_8blocks(chunk_array, &keys.serpent_key)?;
-        serpent_total += serpent_start.elapsed();
-        eprintln!("DEBUG: Completed chunk {}", i);
     }
     
-    println!("[ENCRYPT] Threefish-1024: {:.2?}", threefish_total);
-    println!("[ENCRYPT] Serpent cipher: {:.2?}", serpent_total);
-    println!("[ENCRYPT] Custom ciphers total: {:.2?}", cipher_time.elapsed());
-    
     // AES-GCM encryption
-    let aes_time = Instant::now();
     let cipher = Aes256Gcm::new_from_slice(&keys.aes_key).expect("AES-256 key must be exactly 32 bytes");
 
     let mut iv = [0u8; AES256_IV_SIZE];
@@ -442,7 +390,6 @@ pub fn triple_encrypt(master_key: &[u8; 128], plaintext: &[u8]) -> Result<Vec<u8
     
     let ciphertext = cipher.encrypt(nonce, processed.as_slice())
         .map_err(|_| CryptoError::EncryptionFailed)?;
-    println!("[ENCRYPT] AES-GCM: {:.2?}", aes_time.elapsed());
     
     // Construct final output: IV + ciphertext + tag
     let mut result = Vec::with_capacity(AES256_IV_SIZE + ciphertext.len());
@@ -456,17 +403,12 @@ pub fn triple_encrypt(master_key: &[u8; 128], plaintext: &[u8]) -> Result<Vec<u8
     keys.serpent_key.zeroize();
     keys.tf_key_128.zeroize();
     
-    let elapsed = start_time.elapsed();
-    println!("Triple encryption completed in: {:.2?} ({} bytes)", elapsed, plaintext.len());
-    
     Ok(result)
 }
 
-//MARK: Ultra-optimized block-by-block triple decryption with debug error codes
+// MARK: triple_decrypt
 #[inline]
 pub fn triple_decrypt(master_key: &[u8; 128], input: &[u8]) -> Result<Vec<u8>, CryptoError> {
-    let start_time = Instant::now();
-    // ERROR -100: Input too small
     if input.len() < AES256_IV_SIZE + AES256_TAG_SIZE {
         return Err(CryptoError::DebugCode(-100));
     }
@@ -515,146 +457,12 @@ pub fn triple_decrypt(master_key: &[u8; 128], input: &[u8]) -> Result<Vec<u8>, C
     keys.aes_key.zeroize();
     keys.serpent_key.zeroize();
     keys.tf_key_128.zeroize();
-    
-    let _elapsed = start_time.elapsed();
     Ok(processed)
 }
 
-//MARK: generate_password
-pub fn generate_password(
-    mode: u8,
-    hash_bytes: &[u8],
-    desired_len: usize,
-    enabled_symbol_sets: &[bool; 3]
-) -> Option<String> {
-    if hash_bytes.is_empty() || desired_len == 0 || desired_len > MAX_PASSWORD_LEN {
-        return None;
-    }
-    
-    let mut password = vec![0u8; desired_len];
-    
-    if mode == 0 {
-        // BASE93 MODE - Direct generation from hash bytes
-        const BASE93_MIN: u8 = 33;
-        const BASE93_MAX: u8 = 126;
-        const BASE93_RANGE: u8 = BASE93_MAX - BASE93_MIN + 1;
-        
-        let mut has_lower = false;
-        let mut has_upper = false;
-        let mut has_digit = false;
-        let mut has_symbol = false;
-        
-        for i in 0..desired_len {
-            let ch = (hash_bytes[i % hash_bytes.len()] % BASE93_RANGE) + BASE93_MIN;
-            password[i] = ch;
-            
-            let c = ch as char;
-            if c.is_ascii_lowercase() { has_lower = true; }
-            else if c.is_ascii_uppercase() { has_upper = true; }
-            else if c.is_ascii_digit() { has_digit = true; }
-            else if !c.is_ascii_alphanumeric() { has_symbol = true; }
-        }
-        
-        // Ensure all character classes are present
-        for i in 0..desired_len {
-            if has_lower && has_upper && has_digit && has_symbol { break; }
-            
-            let b = hash_bytes[(i + 1) % hash_bytes.len()];
-            let current_char = password[i] as char;
-            
-            if !has_lower && !current_char.is_ascii_lowercase() {
-                password[i] = CHAR_SETS[0].as_bytes()[b as usize % 26];
-                has_lower = true;
-            } else if !has_upper && !current_char.is_ascii_uppercase() {
-                password[i] = CHAR_SETS[1].as_bytes()[b as usize % 26];
-                has_upper = true;
-            } else if !has_digit && !current_char.is_ascii_digit() {
-                password[i] = CHAR_SETS[2].as_bytes()[b as usize % 10];
-                has_digit = true;
-            } else if !has_symbol && !current_char.is_ascii_alphanumeric() {
-                let candidate = (b % BASE93_RANGE) + BASE93_MIN;
-                if !(candidate as char).is_ascii_alphanumeric() {
-                    password[i] = candidate;
-                    has_symbol = true;
-                }
-            }
-        }
-    } else {
-        // CHARACTER SET MODE
-        generate_charset_password(&mut password, hash_bytes, desired_len, enabled_symbol_sets);
-    }
-    
-    String::from_utf8(password).ok()
-}
 
-// Helper function for charset mode
-fn generate_charset_password(
-    password: &mut [u8],
-    hash_bytes: &[u8],
-    desired_len: usize,
-    enabled_symbol_sets: &[bool; 3]
-) {
-    let mut active_set_flags = [true, true, true, false, false, false];
-    for i in 0..3 {
-        if enabled_symbol_sets[i] {
-            active_set_flags[3 + i] = true;
-        }
-    }
-    
-    let mut active_sets = Vec::new();
-    for i in 0..NUM_SETS {
-        if active_set_flags[i] {
-            active_sets.push(i);
-        }
-    }
-    
-    let total_active_sets = active_sets.len();
-    let mut set_counts = [0; NUM_SETS];
-    let mut char_set_index = vec![0; desired_len];
-    
-    for i in 0..desired_len {
-        let b = hash_bytes[i % hash_bytes.len()];
-        let set_idx = (b as usize) % total_active_sets;
-        let actual_set = active_sets[set_idx];
-        let charset = CHAR_SETS[actual_set];
-        let ch = charset.as_bytes()[b as usize % charset.len()];
-        
-        password[i] = ch;
-        set_counts[actual_set] += 1;
-        char_set_index[i] = actual_set;
-    }
-    
-    // Ensure all active sets are represented
-    let mut missing_sets = Vec::new();
-    for i in 0..NUM_SETS {
-        if active_set_flags[i] && set_counts[i] == 0 {
-            missing_sets.push(i);
-        }
-    }
-    
-    for &missing in &missing_sets {
-        let mut max_set = 0;
-        let mut max_count = 0;
-        for i in 0..NUM_SETS {
-            if active_set_flags[i] && set_counts[i] > max_count {
-                max_set = i;
-                max_count = set_counts[i];
-            }
-        }
-        
-        for i in 0..desired_len {
-            if char_set_index[i] == max_set {
-                let b = hash_bytes[(i + missing) % hash_bytes.len()];
-                let charset = CHAR_SETS[missing];
-                password[i] = charset.as_bytes()[b as usize % charset.len()];
-                set_counts[max_set] -= 1;
-                set_counts[missing] += 1;
-                char_set_index[i] = missing;
-                break;
-            }
-        }
-    }
-}
+pub use super::password::{generate_password, derive_password_hash_secure};
+
 
 //MARK: LAYERED HYBRID KEY EXCHANGE (Kyber+X448 and HQC+P521)
 
@@ -664,16 +472,14 @@ pub fn pqc_4hybrid_init() -> Result<(Vec<u8>, super::hybrid::HybridSenderState),
     super::hybrid::pqc_4hybrid_init()
 }
 
-//MARK: pqc_4hybrid_recv
-/// Layered hybrid receiver response
+// MARK: pqc_4hybrid_recv
 pub fn pqc_4hybrid_recv(
     hybrid_1_key: &[u8]
 ) -> Result<(Vec<u8>, super::hybrid::HybridReceiverState), CryptoError> {
     super::hybrid::pqc_4hybrid_recv(hybrid_1_key)
 }
 
-//MARK: pqc_4hybrid_snd_final
-/// Complete layered hybrid exchange with secure key expansion
+// MARK: pqc_4hybrid_snd_final
 pub fn pqc_4hybrid_snd_final(
     hybrid_2_key: &[u8],
     hybrid_sender_state: &super::hybrid::HybridSenderState
@@ -681,8 +487,7 @@ pub fn pqc_4hybrid_snd_final(
     super::hybrid::pqc_4hybrid_snd_final(hybrid_2_key, hybrid_sender_state)
 }
 
-//MARK: pqc_4hybrid_recv_final
-/// Finalize layered hybrid exchange  
+// MARK: pqc_4hybrid_recv_final
 pub fn pqc_4hybrid_recv_final(
     hybrid_3_key: &[u8],
     hybrid_receiver_state: &super::hybrid::HybridReceiverState
@@ -690,8 +495,7 @@ pub fn pqc_4hybrid_recv_final(
     super::hybrid::pqc_4hybrid_recv_final(hybrid_3_key, hybrid_receiver_state)
 }
 
-//MARK: triple_encrypt_fd_raw
-/// Raw FD version of triple_encrypt_fd that avoids Rust File objects to prevent fdsan conflicts
+// MARK: triple_encrypt_fd_raw
 pub fn triple_encrypt_fd_raw(
     secret: &[u8],
     _is_keyfile: bool,
@@ -853,8 +657,7 @@ pub fn triple_encrypt_fd_raw(
     Ok(())
 }
 
-//MARK: triple_decrypt_fd_raw
-/// Raw FD version of triple_decrypt_fd that avoids Rust File objects to prevent fdsan conflicts
+// MARK: triple_decrypt_fd_raw
 pub fn triple_decrypt_fd_raw(
     secret: &[u8],
     _is_keyfile: bool,

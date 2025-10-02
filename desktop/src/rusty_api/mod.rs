@@ -5,6 +5,7 @@ pub mod symmetric;
 pub mod asymmetric;
 pub mod hybrid;
 pub mod api;
+pub mod password;
 
 // Re-export main API functions for convenience
 pub use api::*;

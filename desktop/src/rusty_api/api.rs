@@ -559,7 +559,6 @@ pub fn decrypt_file_pqrypt2(
         
         // CTR decrypt
         ctr.apply_keystream(&mut last_block);
-        // Reset chaining state for final block (match encryption behavior)
         let mut threefish_chain = keys.threefish_iv;
         let mut serpent_chain = keys.serpent_iv;
         // Reverse triple
@@ -603,113 +602,9 @@ pub fn decrypt_file_pqrypt2(
     Ok(())
 }
 
-// Password generation matching the Android implementation exactly
-pub fn generate_password(
-    mode: u8,
-    hash_bytes: &[u8],
-    desired_len: usize,
-    enabled_symbol_sets: &[bool; 3]
-) -> Option<String> {
-    if hash_bytes.is_empty() || desired_len == 0 || desired_len > MAX_PASSWORD_LEN {
-        return None;
-    }
-    
-    let mut password = vec![0u8; desired_len];
-    
-    if mode == 0 {
-        // BASE93 MODE - Direct generation from hash bytes
-        const BASE93_MIN: u8 = 33;
-        const BASE93_MAX: u8 = 126;
-        const BASE93_RANGE: u8 = BASE93_MAX - BASE93_MIN + 1;
-        
-        let mut has_lower = false;
-        let mut has_upper = false;
-        let mut has_digit = false;
-        let mut has_symbol = false;
-        
-        for i in 0..desired_len {
-            let ch = (hash_bytes[i % hash_bytes.len()] % BASE93_RANGE) + BASE93_MIN;
-            password[i] = ch;
-            
-            let c = ch as char;
-            if c.is_ascii_lowercase() { has_lower = true; }
-            else if c.is_ascii_uppercase() { has_upper = true; }
-            else if c.is_ascii_digit() { has_digit = true; }
-            else if !c.is_ascii_alphanumeric() { has_symbol = true; }
-        }
-        
-        // Ensure all character classes are present
-        for i in 0..desired_len {
-            if has_lower && has_upper && has_digit && has_symbol { break; }
-            
-            let b = hash_bytes[(i + 1) % hash_bytes.len()];
-            let current_char = password[i] as char;
-            
-            if !has_lower && !current_char.is_ascii_lowercase() {
-                password[i] = CHAR_SETS[0].as_bytes()[b as usize % 26];
-                has_lower = true;
-            } else if !has_upper && !current_char.is_ascii_uppercase() {
-                password[i] = CHAR_SETS[1].as_bytes()[b as usize % 26];
-                has_upper = true;
-            } else if !has_digit && !current_char.is_ascii_digit() {
-                password[i] = CHAR_SETS[2].as_bytes()[b as usize % 10];
-                has_digit = true;
-            } else if !has_symbol && !current_char.is_ascii_alphanumeric() {
-                let candidate = (b % BASE93_RANGE) + BASE93_MIN;
-                if !(candidate as char).is_ascii_alphanumeric() {
-                    password[i] = candidate;
-                    has_symbol = true;
-                }
-            }
-        }
-    } else {
-        // CHARACTER SET MODE
-        generate_charset_password(&mut password, hash_bytes, desired_len, enabled_symbol_sets);
-    }
-    
-    String::from_utf8(password).ok()
-}
 
-// Secure password hash derivation function
-pub fn derive_password_hash_secure(
-    _app_name: &str,
-    app_password: &str,
-    master_password: &str,
-    salt_source: &str
-) -> Result<Vec<u8>, CryptoError> {
-    // Create salt from app_name
-    let salt_bytes = salt_source.as_bytes();
-    let mut salt = [0u8; 32];
-    let copy_len = salt_bytes.len().min(32);
-    salt[..copy_len].copy_from_slice(&salt_bytes[..copy_len]);
-    
-    // First hash: master_password with app_name as salt
-    let first_hash = argon2id_hash(master_password.as_bytes(), &salt, 64, 10240, 1, 1)?;
-    
-    // If app_password exists, hash again with app_password as salt
-    if !app_password.is_empty() {
-        let app_salt_bytes = app_password.as_bytes();
-        let mut app_salt = [0u8; 32];
-        let app_copy_len = app_salt_bytes.len().min(32);
-        app_salt[..app_copy_len].copy_from_slice(&app_salt_bytes[..app_copy_len]);
-        
-        argon2id_hash(&first_hash, &app_salt, 64, 10240, 1, 1)
-    } else {
-        Ok(first_hash)
-    }
-}
-
-// Secure password generation function
-pub fn generate_password_secure(
-    mode: u8,
-    hash_bytes: &[u8],
-    desired_len: usize,
-    enabled_symbol_sets: &[bool; 3],
-    _user_id: &str
-) -> Result<String, CryptoError> {
-    generate_password(mode, hash_bytes, desired_len, enabled_symbol_sets)
-        .ok_or(CryptoError::KeyGenerationFailed)
-}
+// Re-export password functions
+pub use super::password::{generate_password, derive_password_hash_secure};
 
 // Android-compatible Argon2id hashing (matches JNI c_ffi argon2_hash_c)
 // - memory = 16MB, iterations = 3, lanes = 1 - MATCH ANDROID EXACTLY
@@ -773,74 +668,6 @@ pub fn derive_password_hash_android_compat(
     Ok(out_hash)
 }
 
-// Helper function for charset mode
-fn generate_charset_password(
-    password: &mut [u8],
-    hash_bytes: &[u8],
-    desired_len: usize,
-    enabled_symbol_sets: &[bool; 3]
-) {
-    let mut active_set_flags = [true, true, true, false, false, false];
-    for i in 0..3 {
-        if enabled_symbol_sets[i] {
-            active_set_flags[3 + i] = true;
-        }
-    }
-    
-    let mut active_sets = Vec::new();
-    for i in 0..NUM_SETS {
-        if active_set_flags[i] {
-            active_sets.push(i);
-        }
-    }
-    
-    let total_active_sets = active_sets.len();
-    let mut set_counts = [0; NUM_SETS];
-    let mut char_set_index = vec![0; desired_len];
-    
-    for i in 0..desired_len {
-        let b = hash_bytes[i % hash_bytes.len()];
-        let set_idx = (b as usize) % total_active_sets;
-        let actual_set = active_sets[set_idx];
-        let charset = CHAR_SETS[actual_set];
-        let ch = charset.as_bytes()[b as usize % charset.len()];
-        
-        password[i] = ch;
-        set_counts[actual_set] += 1;
-        char_set_index[i] = actual_set;
-    }
-    
-    // Ensure all active sets are represented
-    let mut missing_sets = Vec::new();
-    for i in 0..NUM_SETS {
-        if active_set_flags[i] && set_counts[i] == 0 {
-            missing_sets.push(i);
-        }
-    }
-    
-    for &missing in &missing_sets {
-        let mut max_set = 0;
-        let mut max_count = 0;
-        for i in 0..NUM_SETS {
-            if active_set_flags[i] && set_counts[i] > max_count {
-                max_set = i;
-                max_count = set_counts[i];
-            }
-        }
-        
-        for i in 0..desired_len {
-            if char_set_index[i] == max_set {
-                let b = hash_bytes[(i + missing) % hash_bytes.len()];
-                let charset = CHAR_SETS[missing];
-                password[i] = charset.as_bytes()[b as usize % charset.len()];
-                set_counts[max_set] -= 1;
-                set_counts[missing] += 1;
-                char_set_index[i] = missing;
-                break;
-            }
-        }
-    }
-}
 
 //MARK: LAYERED HYBRID KEY EXCHANGE (Kyber+X448 and HQC+P521)
 

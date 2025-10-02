@@ -28,7 +28,6 @@ import com.pqrypt.app.databinding.ActivitySecureShareBluetoothFileBinding
 import kotlinx.coroutines.*
 import android.os.ParcelFileDescriptor
 import android.os.Environment
-import android.util.Log
 import java.io.*
 import java.util.*
 
@@ -177,15 +176,6 @@ class SecureShareBluetoothFileActivity : AppCompatActivity() {
             }
         }
         
-        // Open output folder button (receiver only)
-        binding.btnChooseOutputFolder?.setOnClickListener {
-            openOutputFolder()
-        }
-        
-        // Show output folder button only for receiver
-        if (!isSender) {
-            binding.llOutputFolder?.visibility = View.VISIBLE
-        }
 
         // Setup RecyclerView for device list (sender only)
         if (isSender) {
@@ -915,7 +905,7 @@ class SecureShareBluetoothFileActivity : AppCompatActivity() {
             }?.forEach { it.delete() }
             
         } catch (e: Exception) {
-            Log.e("Cleanup", "Failed to clean up intermediate files", e)
+            // Failed to clean up intermediate files
         }
     }
     
@@ -925,7 +915,7 @@ class SecureShareBluetoothFileActivity : AppCompatActivity() {
         try {
             unregisterReceiver(bluetoothReceiver)
         } catch (e: Exception) {
-            Log.e("Bluetooth", "Failed to unregister receiver", e)
+            // Failed to unregister receiver
         }
         
         bluetoothSocket?.close()

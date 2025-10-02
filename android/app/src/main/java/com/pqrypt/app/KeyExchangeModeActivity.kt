@@ -11,6 +11,7 @@ class KeyExchangeModeActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        
         binding = ActivityKeyExchangeModeBinding.inflate(layoutInflater)
         setContentView(binding.root)
 

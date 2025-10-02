@@ -5,8 +5,6 @@ use super::symmetric::argon2id_hash;
 use zeroize::Zeroize;
 use serde::{Serialize, Deserialize};
 
-// HYBRID KEY EXCHANGE TYPE DEFINITIONS
-
 #[derive(Serialize, Deserialize)]
 pub struct KyberX448SenderState(
     #[serde(with = "serde_arrays")] pub [u8; KYBER_SECRETKEYBYTES], 
@@ -98,9 +96,7 @@ fn unpack_and_verify_keyfile(signed: &[u8]) -> Result<Vec<u8>, CryptoError> {
     Ok(content.to_vec())
 }
 
-//MARK: KYBER+X448 HYBRID KEY EXCHANGE
-
-/// Initialize Kyber+X448 key exchange
+// MARK: mlkem_x448_init
 pub fn mlkem_x448_init() -> Result<([u8; KYBER_PUBLICKEYBYTES], KyberX448SenderState), CryptoError> {
     let (sender_kyber_pk, sender_kyber_sk) = crypto_kyber1024_keypair()?;
     let (sender_x448_pk, sender_x448_sk) = crypto_x448_keypair()?;
@@ -108,7 +104,7 @@ pub fn mlkem_x448_init() -> Result<([u8; KYBER_PUBLICKEYBYTES], KyberX448SenderS
     Ok((sender_kyber_pk, sender_state))
 }
 
-/// Kyber+X448 receiver response with secure key encryption
+// MARK: mlkem_x448_recv
 pub fn mlkem_x448_recv(
     sender_kyber_pk: &[u8; KYBER_PUBLICKEYBYTES]
 ) -> Result<(Vec<u8>, KyberX448ReceiverState), CryptoError> {
@@ -132,7 +128,7 @@ pub fn mlkem_x448_recv(
     Ok((bundled_data, receiver_state))
 }
 
-/// Complete Kyber+X448 exchange with security validation
+// MARK: mlkem_x448_snd_final
 pub fn mlkem_x448_snd_final(
     receiver_bundle: &[u8],
     sender_state: &KyberX448SenderState
@@ -189,7 +185,7 @@ pub fn mlkem_x448_snd_final(
     Ok((final_shared_secret, sender_final_bundle))
 }
 
-/// Finalize Kyber+X448 exchange
+// MARK: mlkem_x448_recv_final
 pub fn mlkem_x448_recv_final(
     sender_final_bundle: &[u8],
     receiver_state: &KyberX448ReceiverState
@@ -231,9 +227,7 @@ pub fn mlkem_x448_recv_final(
     crypto_x448_shared_secret(&sender_x448_pk, receiver_x448_sk)
 }
 
-//MARK: HQC+P521 HYBRID KEY EXCHANGE
-
-/// Initialize HQC+P521 key exchange
+// MARK: hqc_p521_init
 pub fn hqc_p521_init() -> Result<([u8; HQC256_PUBLICKEYBYTES], HqcP521SenderState), CryptoError> {
     let (sender_hqc_pk, sender_hqc_sk) = crypto_hqc256_keypair()?;
     let (sender_p521_pk, sender_p521_sk) = crypto_p521_keypair()?;
@@ -241,7 +235,7 @@ pub fn hqc_p521_init() -> Result<([u8; HQC256_PUBLICKEYBYTES], HqcP521SenderStat
     Ok((sender_hqc_pk, sender_state))
 }
 
-/// HQC+P521 receiver response with secure key encryption
+// MARK: hqc_p521_recv
 pub fn hqc_p521_recv(
     sender_hqc_pk: &[u8]
 ) -> Result<(Vec<u8>, HqcP521ReceiverState), CryptoError> {
@@ -265,7 +259,7 @@ pub fn hqc_p521_recv(
     Ok((bundled_data, receiver_state))
 }
 
-/// Complete HQC+P521 exchange
+// MARK: hqc_p521_snd_final
 pub fn hqc_p521_snd_final(
     receiver_bundle: &[u8],
     sender_state: &HqcP521SenderState
@@ -318,7 +312,7 @@ pub fn hqc_p521_snd_final(
     Ok((final_secret, sender_final_bundle))
 }
 
-/// Finalize HQC+P521 exchange
+// MARK: hqc_p521_recv_final
 pub fn hqc_p521_recv_final(
     sender_final_bundle: &[u8],
     receiver_state: &HqcP521ReceiverState
@@ -357,7 +351,7 @@ pub fn hqc_p521_recv_final(
     crypto_p521_shared_secret(&sender_p521_pk, receiver_p521_sk)
 }
 
-/// Initialize layered hybrid key exchange
+// MARK: pqc_4hybrid_init
 pub fn pqc_4hybrid_init() -> Result<(Vec<u8>, HybridSenderState), CryptoError> {
     let (impl1_kyber_pk, impl1_sender_state) = mlkem_x448_init()?;
     let (impl2_hqc_pk, impl2_sender_state) = hqc_p521_init()?;
@@ -375,7 +369,7 @@ pub fn pqc_4hybrid_init() -> Result<(Vec<u8>, HybridSenderState), CryptoError> {
     Ok((hybrid_1_signed, hybrid_sender_state))
 }
 
-/// Layered hybrid receiver response
+// MARK: pqc_4hybrid_recv
 pub fn pqc_4hybrid_recv(
     hybrid_1_key: &[u8]
 ) -> Result<(Vec<u8>, HybridReceiverState), CryptoError> {
@@ -391,11 +385,9 @@ pub fn pqc_4hybrid_recv(
     
     // Process first implementation (Kyber+X448)
     let (impl1_bundle, impl1_receiver_state) = mlkem_x448_recv(&impl1_kyber_pk)?;
-    println!("DEBUG: impl1_bundle size: {}", impl1_bundle.len());
     
     // Process second implementation (HQC+P521) 
     let (impl2_bundle, impl2_receiver_state) = hqc_p521_recv(impl2_hqc_pk)?;
-    println!("DEBUG: impl2_bundle size: {}", impl2_bundle.len());
     
     // Combine both bundles into content
     let mut hybrid_2_content = Vec::new();
@@ -469,7 +461,7 @@ pub fn pqc_4hybrid_snd_final(
     Ok((final_key_array, hybrid_3_signed))
 }
 
-/// Finalize layered hybrid exchange  
+// MARK: pqc_4hybrid_recv_final
 pub fn pqc_4hybrid_recv_final(
     hybrid_3_key: &[u8],
     hybrid_receiver_state: &HybridReceiverState

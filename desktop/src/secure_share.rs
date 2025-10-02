@@ -1,20 +1,18 @@
 use std::fs;
 use crate::rusty_api;
-
-// State management for Secure Share
 pub struct SecureShareState {
     pub pqc_state: PqcState,
     pub temp_text_file: Option<String>,
     pub is_sender: bool,
-    pub mode: String, // "text" or "file"
-    pub step: u8, // Current step in the process
-    pub key_output_dir: String, // Directory for key files
+    pub mode: String,
+    pub step: u8,
+    pub key_output_dir: String,
 }
 
 pub struct PqcState {
     sender_state: Option<rusty_api::hybrid::HybridSenderState>,
     receiver_state: Option<rusty_api::hybrid::HybridReceiverState>,
-    final_shared_secret: Option<[u8; 128]>, // final 128-byte secret
+    final_shared_secret: Option<[u8; 128]>,
     pub step: u8,
 }
 
@@ -30,6 +28,7 @@ impl PqcState {
 }
 
 impl SecureShareState {
+    // MARK: new
     pub fn new() -> Self {
         // Use executable directory by default
         let default_dir = std::env::current_exe()
@@ -56,7 +55,6 @@ impl SecureShareState {
         self.is_sender = false;
         self.mode = "file".to_string();
         self.step = 0;
-        // Keep the key_output_dir
     }
     
     pub fn set_key_output_dir(&mut self, dir: &str) {
@@ -100,7 +98,6 @@ pub fn start_sender(state: &mut SecureShareState, text_content: Option<&str>, fi
     state.is_sender = true;
     state.step = 1;
     
-    // Handle text mode - write text to temporary file
     if state.mode == "text" {
         if let Some(text) = text_content {
             if text.is_empty() {
@@ -128,7 +125,6 @@ pub fn start_sender(state: &mut SecureShareState, text_content: Option<&str>, fi
             return SecureShareResult::error("No text content provided for text sharing mode");
         }
     } else {
-        // File mode - check if file is provided
         if let Some(path) = file_path {
             if path.is_empty() {
                 return SecureShareResult::error("Please select a file to share first");
@@ -140,8 +136,8 @@ pub fn start_sender(state: &mut SecureShareState, text_content: Option<&str>, fi
     }
 }
 
+// MARK: start_pqc_exchange
 fn start_pqc_exchange(state: &mut SecureShareState, _file_path: Option<String>) -> SecureShareResult {
-    // Start PQC key exchange as sender
     let (sender_bundle, sender_state) = match rusty_api::pqc_4hybrid_init() {
         Ok(result) => result,
         Err(e) => {
@@ -170,7 +166,7 @@ pub fn start_receiver(state: &mut SecureShareState, mode: &str) -> SecureShareRe
     state.is_sender = false;
     state.mode = mode.to_string();
     state.step = 1;
-    state.pqc_state.step = 0; // Initialize PQC state step to 0 for receiver
+    state.pqc_state.step = 0;
     SecureShareResult::success("Waiting for sender's 1.key file. Use 'Open Sender's Key' when received.", None)
 }
 
@@ -184,7 +180,6 @@ pub fn generate_key_with_file_path(state: &mut SecureShareState, key_file_path: 
     }
     
     if state.is_sender {
-        // Sender generates final key from receiver's response
         if state.pqc_state.step == 1 {
             match fs::read(key_file_path) {
                 Ok(receiver_bundle) => {
@@ -199,16 +194,11 @@ pub fn generate_key_with_file_path(state: &mut SecureShareState, key_file_path: 
                                 let final_key_path = std::path::Path::new(&state.key_output_dir).join("final.key");
                                 match fs::write(&key3_path, &sender_final_bundle) {
                                     Ok(_) => {
-                                        // Also save final.key for encryption
                                         match fs::write(&final_key_path, &final_shared_secret) {
                                             Ok(_) => {
-                                                // Debug: Print key hash for verification
-                                                println!("SENDER final.key hash: {:?}", &final_shared_secret[..8]);
-                                                // Clean up intermediate key files
                                                 let _ = fs::remove_file(std::path::Path::new(&state.key_output_dir).join("1.key"));
                                                 let _ = fs::remove_file(std::path::Path::new(&state.key_output_dir).join("2.key"));
                                                 
-                                                // Auto-encrypt the file now that we have final.key
                                                 let encrypt_result = if state.mode == "text" {
                                                     if let Some(temp_file) = &state.temp_text_file {
                                                         encrypt_file_with_key_dir(temp_file, &state.key_output_dir)
@@ -256,9 +246,7 @@ pub fn generate_key_with_file_path(state: &mut SecureShareState, key_file_path: 
             SecureShareResult::error("Invalid step for sender key generation")
         }
     } else {
-        // Receiver logic
         if state.pqc_state.step == 0 {
-            // Generate response to sender's initial key
             match fs::read(key_file_path) {
                 Ok(sender_bundle) => {
                     match rusty_api::pqc_4hybrid_recv(&sender_bundle) {
@@ -286,7 +274,6 @@ pub fn generate_key_with_file_path(state: &mut SecureShareState, key_file_path: 
                 Err(e) => SecureShareResult::error(&format!("Error reading key: {}", e)),
             }
         } else if state.pqc_state.step == 1 {
-            // Finalize with sender's final key
             match fs::read(key_file_path) {
                 Ok(sender_final_bundle) => {
                     if let Some(receiver_state) = &state.pqc_state.receiver_state {
@@ -299,16 +286,12 @@ pub fn generate_key_with_file_path(state: &mut SecureShareState, key_file_path: 
                                 let final_key_path = std::path::Path::new(&state.key_output_dir).join("final.key");
                                 match fs::write(&final_key_path, &final_shared_secret) {
                                     Ok(_) => {
-                                        // Debug: Print key hash for verification
-                                        println!("RECEIVER final.key hash: {:?}", &final_shared_secret[..8]);
-                                        // Clean up intermediate key files
                                         let _ = fs::remove_file(std::path::Path::new(&state.key_output_dir).join("1.key"));
                                         let _ = fs::remove_file(std::path::Path::new(&state.key_output_dir).join("2.key"));
                                         let _ = fs::remove_file(std::path::Path::new(&state.key_output_dir).join("3.key"));
                                         
                                         let full_path = final_key_path.canonicalize()
                                             .unwrap_or_else(|_| final_key_path.clone());
-                                        // Auto-decrypt encrypted files
                                         let decrypt_result = auto_decrypt_encrypted_files(&state.key_output_dir, &state.mode);
                                         match decrypt_result {
                                             Ok(content) => {
@@ -358,7 +341,6 @@ pub fn encrypt_file_with_key_dir(file_path: &str, key_dir: &str) -> SecureShareR
         return SecureShareResult::error("No file to encrypt");
     }
     
-    // Use final.key for encryption
     let final_key_path = std::path::Path::new(key_dir).join("final.key");
     match fs::read(&final_key_path) {
         Ok(key_data) => {
@@ -368,7 +350,6 @@ pub fn encrypt_file_with_key_dir(file_path: &str, key_dir: &str) -> SecureShareR
             secret[..copy_len].copy_from_slice(&key_data[..copy_len]);
             let secret = &secret;
             
-            // Generate encrypted file in the key directory
             let file_name = std::path::Path::new(file_path)
                 .file_name()
                 .unwrap_or(std::ffi::OsStr::new("file"))
@@ -403,7 +384,6 @@ pub fn decrypt_file_with_key_dir(file_path: &str, mode: &str, key_dir: &str) -> 
         return SecureShareResult::error("No encrypted file selected");
     }
     
-    // Use final.key for decryption
     let final_key_path = std::path::Path::new(key_dir).join("final.key");
     match fs::read(&final_key_path) {
         Ok(key_data) => {
@@ -413,7 +393,6 @@ pub fn decrypt_file_with_key_dir(file_path: &str, mode: &str, key_dir: &str) -> 
             secret[..copy_len].copy_from_slice(&key_data[..copy_len]);
             let secret = &secret;
             
-            // Generate output path in the key directory, removing .encrypted extension
             let original_name = if file_path.ends_with(".encrypted") {
                 std::path::Path::new(file_path)
                     .file_name()
@@ -438,7 +417,6 @@ pub fn decrypt_file_with_key_dir(file_path: &str, mode: &str, key_dir: &str) -> 
                         .canonicalize()
                         .unwrap_or_else(|_| std::path::PathBuf::from(&output_path));
                     
-                    // If text mode, read the decrypted file content
                     if mode == "text" {
                         match fs::read_to_string(&output_path) {
                             Ok(text_content) => {
@@ -453,14 +431,23 @@ pub fn decrypt_file_with_key_dir(file_path: &str, mode: &str, key_dir: &str) -> 
                         )
                     }
                 }
-                Err(e) => SecureShareResult::error(&format!("Decryption failed: {}", e)),
+                Err(e) => {
+                    let error_msg = if e.to_string().contains("Authentication failed") || 
+                                       e.to_string().contains("GCM") ||
+                                       e.to_string().contains("tag") {
+                        "Authentication/decryption failed. This may be due to file corruption, tampering, or wrong file selection."
+                    } else {
+                        &format!("Decryption failed: {}. This may be due to file corruption, tampering, or wrong file selection.", e)
+                    };
+                    SecureShareResult::error(error_msg)
+                },
             }
         }
         Err(e) => SecureShareResult::error(&format!("Error reading final.key: {}", e)),
     }
 }
 
-// Helper function to generate unique filename with "_copy" suffix for duplicates
+// MARK: generate_unique_filename
 fn generate_unique_filename(base_path: &str) -> String {
     let path = std::path::Path::new(base_path);
     
@@ -468,12 +455,10 @@ fn generate_unique_filename(base_path: &str) -> String {
         return base_path.to_string();
     }
     
-    // Extract filename and extension
     let parent = path.parent().unwrap_or(std::path::Path::new(""));
     let stem = path.file_stem().unwrap_or(std::ffi::OsStr::new("file")).to_string_lossy();
     let extension = path.extension().map(|e| format!(".{}", e.to_string_lossy())).unwrap_or_default();
     
-    // Try with "_copy" suffix
     for i in 1..=100 {
         let copy_suffix = "_copy".repeat(i);
         let new_filename = format!("{}{}{}", stem, copy_suffix, extension);
@@ -484,15 +469,13 @@ fn generate_unique_filename(base_path: &str) -> String {
         }
     }
     
-    // Fallback if all attempts failed
     base_path.to_string()
 }
 
-// Auto-decrypt encrypted files in the key directory
+// MARK: auto_decrypt_encrypted_files
 fn auto_decrypt_encrypted_files(key_dir: &str, mode: &str) -> Result<String, String> {
     let dir_path = std::path::Path::new(key_dir);
     
-    // Look for .encrypted files in the directory
     let entries = match fs::read_dir(dir_path) {
         Ok(entries) => entries,
         Err(e) => return Err(format!("Cannot read directory: {}", e)),
@@ -504,7 +487,6 @@ fn auto_decrypt_encrypted_files(key_dir: &str, mode: &str) -> Result<String, Str
             if path.extension().and_then(|s| s.to_str()) == Some("encrypted") {
                 let file_path = path.to_string_lossy().to_string();
                 
-                // Try to decrypt this file
                 let result = decrypt_file_with_key_dir(&file_path, mode, key_dir);
                 if result.success {
                     if let Some(content) = result.file_path {

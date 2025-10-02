@@ -31,6 +31,7 @@ component ColorButton inherits Rectangle {
         horizontal-alignment: center;
         vertical-alignment: center;
         font-weight: 600;
+        font-family: "Inter";
     }
 }
 
@@ -108,6 +109,7 @@ export component MainWindow inherits Window {
                 text: "Welcome to PQrypt";
                 font-size: 24px;
                 font-weight: 700;
+                font-family: "Inter";
                 horizontal-alignment: center;
             }
             
@@ -194,6 +196,7 @@ export component MainWindow inherits Window {
                 text: "File Encryption";
                 font-size: 20px;
                 font-weight: 600;
+                font-family: "Inter";
             }
             
             ColorButton {
@@ -273,6 +276,7 @@ export component MainWindow inherits Window {
                 text: "PQC Key Exchange";
                 font-size: 20px;
                 font-weight: 600;
+                font-family: "Inter";
             }
             
             HorizontalBox {
@@ -333,6 +337,7 @@ export component MainWindow inherits Window {
                 text: "PQC Key Exchange";
                 font-size: 20px;
                 font-weight: 600;
+                font-family: "Inter";
             }
             
             Text {
@@ -393,6 +398,7 @@ export component MainWindow inherits Window {
                 text: "Password Generator";
                 font-size: 20px;
                 font-weight: 600;
+                font-family: "Inter";
             }
             
             Text {
@@ -500,6 +506,7 @@ export component MainWindow inherits Window {
                 text: "Password Settings";
                 font-size: 20px;
                 font-weight: 600;
+                font-family: "Inter";
             }
             
             Text {
@@ -580,7 +587,7 @@ export component MainWindow inherits Window {
                     }
                     Rectangle { }
                 }
-                Text { text: "About PQrypt"; font-size: 20px; font-weight: 600; }
+                Text { text: "About PQrypt"; font-size: 20px; font-weight: 600; font-family: "Inter"; }
                 Text { text: "This app provides:"; }
                 Text { text: "• File Encryption: Encrypt/Decrypt files with password or key file."; wrap: word-wrap; }
                 Text { text: "• PQC Key Exchange: Generate and exchange post-quantum key files (1.key, 2.key, 3.key, final.key)."; wrap: word-wrap; }
@@ -594,7 +601,7 @@ export component MainWindow inherits Window {
             VerticalBox {
                 spacing: 12px; padding: 20px;
                 HorizontalBox { ColorButton { text: "← Back"; bg: Palette.light_purple; clicked => { current-page = "file-encryption"; } } Rectangle { } }
-                Text { text: "File Encryption Help"; font-size: 20px; font-weight: 600; }
+                Text { text: "File Encryption Help"; font-size: 20px; font-weight: 600; font-family: "Inter"; }
                 Text { text: "• Choose File: Select the file to encrypt or decrypt."; wrap: word-wrap; }
                 Text { text: "• Enter password OR Select Key File: Provide exactly one of them."; wrap: word-wrap; }
                 Text { text: "• Encrypt (green): Produces <file>.encrypted with PQRYPT header."; wrap: word-wrap; }
@@ -607,7 +614,7 @@ export component MainWindow inherits Window {
             VerticalBox {
                 spacing: 12px; padding: 20px;
                 HorizontalBox { ColorButton { text: "← Back"; bg: Palette.light_purple; clicked => { current-page = "pqc-key-exchange"; } } Rectangle { } }
-                Text { text: "PQC Key Exchange Help"; font-size: 20px; font-weight: 600; }
+                Text { text: "PQC Key Exchange Help"; font-size: 20px; font-weight: 600; font-family: "Inter"; }
                 Text { text: "• Sender: Start exchange and create 1.key, send to Receiver."; wrap: word-wrap; }
                 Text { text: "• Receiver: Open 1.key → generate 2.key → send 2.key to Sender."; wrap: word-wrap; }
             }
@@ -618,7 +625,7 @@ export component MainWindow inherits Window {
             VerticalBox {
                 spacing: 12px; padding: 20px;
                 HorizontalBox { ColorButton { text: "← Back"; bg: Palette.light_purple; clicked => { current-page = "pqc-exchange-main"; } } Rectangle { } }
-                Text { text: "Exchange Steps"; font-size: 20px; font-weight: 600; }
+                Text { text: "Exchange Steps"; font-size: 20px; font-weight: 600; font-family: "Inter"; }
                 Text { text: "• Sender: Generate 1.key → send to Receiver. Then open 2.key → generate 3.key → send 3.key to Receiver."; wrap: word-wrap; }
                 Text { text: "• Receiver: Open 1.key → generate 2.key → send 2.key to Sender. Then open 3.key → app saves final.key."; wrap: word-wrap; }
             }
@@ -629,7 +636,7 @@ export component MainWindow inherits Window {
             VerticalBox {
                 spacing: 12px; padding: 20px;
                 HorizontalBox { ColorButton { text: "← Back"; bg: Palette.light_purple; clicked => { current-page = "password-vault"; } } Rectangle { } }
-                Text { text: "Password Generator Help"; font-size: 20px; font-weight: 600; }
+                Text { text: "Password Generator Help"; font-size: 20px; font-weight: 600; font-family: "Inter"; }
                 Text { text: "• Enter App/Website name, optional App password, and required Master password."; wrap: word-wrap; }
                 Text { text: "• Generate Password (green): Deterministic password compatible with Android."; wrap: word-wrap; }
                 Text { text: "• Settings: Choose length and special sets. Lowercase, Uppercase and Numbers are always included."; wrap: word-wrap; }
@@ -641,7 +648,7 @@ export component MainWindow inherits Window {
             VerticalBox {
                 spacing: 12px; padding: 20px;
                 HorizontalBox { ColorButton { text: "← Back"; bg: Palette.light_purple; clicked => { current-page = "password-settings"; } } Rectangle { } }
-                Text { text: "Password Settings Help"; font-size: 20px; font-weight: 600; }
+                Text { text: "Password Settings Help"; font-size: 20px; font-weight: 600; font-family: "Inter"; }
                 Text { text: "• Length slider: 8 to 64 characters."; wrap: word-wrap; }
                 Text { text: "• Special Set 1: ~!@#$%^&*()"; }
                 Text { text: "• Special Set 2: /.,';][=-"; }
@@ -680,6 +687,7 @@ export component MainWindow inherits Window {
                 text: "Secure Share";
                 font-size: 20px;
                 font-weight: 600;
+                font-family: "Inter";
             }
             
             Text {
@@ -735,6 +743,7 @@ export component MainWindow inherits Window {
                 text: "Secure Share - " + (secure-share-mode == "text" ? "Text Sharing" : "File Sharing");
                 font-size: 20px;
                 font-weight: 600;
+                font-family: "Inter";
             }
             
             Text {
@@ -807,6 +816,7 @@ export component MainWindow inherits Window {
                 text: "Secure Share - Sender (" + (secure-share-mode == "text" ? "Text" : "File") + ")";
                 font-size: 20px;
                 font-weight: 600;
+                font-family: "Inter";
             }
             
             Text {
@@ -928,6 +938,7 @@ export component MainWindow inherits Window {
                 text: "Secure Share - Receiver (" + (secure-share-mode == "text" ? "Text" : "File") + ")";
                 font-size: 20px;
                 font-weight: 600;
+                font-family: "Inter";
             }
             
             Text {
@@ -1031,7 +1042,7 @@ export component MainWindow inherits Window {
                     Rectangle { }
                 }
                 
-                Text { text: "Secure Share Help"; font-size: 20px; font-weight: 600; }
+                Text { text: "Secure Share Help"; font-size: 20px; font-weight: 600; font-family: "Inter"; }
                 Text { text: "Secure Share combines PQC Key Exchange with File Encryption for ultimate security."; wrap: word-wrap; }
                 Text { text: "• Text Sharing: Send encrypted messages securely"; wrap: word-wrap; }
                 Text { text: "• File Sharing: Send encrypted files securely"; wrap: word-wrap; }

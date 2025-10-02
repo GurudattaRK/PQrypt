@@ -1,5 +1,3 @@
-// Post-quantum cryptography implementations
-
 use fips203::ml_kem_1024;
 use fips203::traits::{KeyGen, Encaps, Decaps, SerDes as Fips203SerDes};
 use rand::rngs::OsRng;
@@ -13,14 +11,13 @@ use pqcrypto_hqc::hqc256::{
 use p521::{PublicKey as P521Public, SecretKey as P521Secret, NistP521};
 use elliptic_curve::{ecdh::diffie_hellman, sec1::ToEncodedPoint, FieldBytes};
 
-// SLH-DSA (SPHINCS+) FIPS-205 implementation
 use fips205::slh_dsa_shake_256f;
 use fips205::traits::{SerDes, Signer, Verifier};
 
 use super::constants_errors::*;
 use super::utils::secure_random_bytes;
 
-//MARK: Kyber1024 operations with proper error handling
+// MARK: crypto_kyber1024_keypair
 pub fn crypto_kyber1024_keypair() -> Result<
     ([u8; KYBER_PUBLICKEYBYTES], [u8; KYBER_SECRETKEYBYTES]),
     CryptoError,
@@ -35,13 +32,10 @@ pub fn crypto_kyber1024_keypair() -> Result<
     Ok((pk, sk))
 }
 
-//MARK: crypto_kyber1024_encaps
-/// Encapsulate using a public key provided as a fixed-size array.
-/// Returns (ciphertext, shared_secret) as fixed-size arrays.
+// MARK: crypto_kyber1024_encaps
 pub fn crypto_kyber1024_encaps(
     public_key: &[u8; KYBER_PUBLICKEYBYTES],
 ) -> Result<([u8; KYBER_CIPHERTEXTBYTES], [u8; KYBER_SHAREDSECRETBYTES]), CryptoError> {
-    // Deserialize public key and encapsulate using FIPS-203 ML-KEM-1024
     let ek = ml_kem_1024::EncapsKey::try_from_bytes(*public_key)
         .map_err(|_| CryptoError::InvalidInput)?;
 
@@ -54,14 +48,11 @@ pub fn crypto_kyber1024_encaps(
     Ok((ct_bytes, ss_bytes))
 }
 
-//MARK: crypto_kyber1024_decaps
-/// Decapsulate using ciphertext and secret key (both as fixed-size arrays).
-/// Returns the shared secret as a fixed-size array.
+// MARK: crypto_kyber1024_decaps
 pub fn crypto_kyber1024_decaps(
     ciphertext: &[u8; KYBER_CIPHERTEXTBYTES],
     secret_key: &[u8; KYBER_SECRETKEYBYTES],
 ) -> Result<[u8; KYBER_SHAREDSECRETBYTES], CryptoError> {
-    // Deserialize secret key and ciphertext, then decapsulate using FIPS-203 ML-KEM-1024
     let dk = ml_kem_1024::DecapsKey::try_from_bytes(*secret_key)
         .map_err(|_| CryptoError::InvalidInput)?;
     let ct = ml_kem_1024::CipherText::try_from_bytes(*ciphertext)
@@ -73,7 +64,7 @@ pub fn crypto_kyber1024_decaps(
     Ok(ss.into_bytes())
 }
 
-//MARK: HQC256 operations with proper error handling
+// MARK: crypto_hqc256_keypair
 pub fn crypto_hqc256_keypair() -> Result<([u8; HQC256_PUBLICKEYBYTES], [u8; HQC256_SECRETKEYBYTES]), CryptoError> {
     let (pk, sk) = hqc_keypair();
     let pk_bytes: [u8; HQC256_PUBLICKEYBYTES] = pk.as_bytes()
@@ -86,7 +77,7 @@ pub fn crypto_hqc256_keypair() -> Result<([u8; HQC256_PUBLICKEYBYTES], [u8; HQC2
     Ok((pk_bytes, sk_bytes))
 }
 
-//MARK: crypto_hqc256_encaps
+// MARK: crypto_hqc256_encaps
 pub fn crypto_hqc256_encaps(public_key: &[u8]) -> Result<(Vec<u8>, [u8; HQC256_SHAREDSECRETBYTES]), CryptoError> {
     if public_key.len() != HQC256_PUBLICKEYBYTES {
         return Err(CryptoError::InvalidInput);
@@ -104,7 +95,7 @@ pub fn crypto_hqc256_encaps(public_key: &[u8]) -> Result<(Vec<u8>, [u8; HQC256_S
     Ok((ct_bytes, ss_bytes))
 }
 
-//MARK: crypto_hqc256_decaps
+// MARK: crypto_hqc256_decaps
 pub fn crypto_hqc256_decaps(
     ciphertext: &[u8], 
     secret_key: &[u8]
@@ -124,9 +115,7 @@ pub fn crypto_hqc256_decaps(
         .map_err(|_| CryptoError::PqcOperationFailed)
 }
 
-// Elliptic curve cryptography implementations
-
-//MARK:X448 operations with secure random generation
+// MARK: crypto_x448_keypair
 pub fn crypto_x448_keypair() -> Result<([u8; X448_KEY_SIZE], [u8; X448_KEY_SIZE]), CryptoError> {
     let mut private_key = [0u8; X448_KEY_SIZE];
     secure_random_bytes(&mut private_key)?;
@@ -137,7 +126,7 @@ pub fn crypto_x448_keypair() -> Result<([u8; X448_KEY_SIZE], [u8; X448_KEY_SIZE]
     Ok((public_key, private_key))
 }
 
-//MARK: crypto_x448_shared_secret
+// MARK: crypto_x448_shared_secret
 pub fn crypto_x448_shared_secret(
     their_public: &[u8; X448_KEY_SIZE], 
     my_private: &[u8; X448_KEY_SIZE]
@@ -146,7 +135,7 @@ pub fn crypto_x448_shared_secret(
         .ok_or(CryptoError::KeyGenerationFailed)
 }
 
-//MARK: P521 operations with proper error handling
+// MARK: crypto_p521_keypair
 pub fn crypto_p521_keypair() -> Result<([u8; P521_KEY_SIZE], [u8; P521_SECRET_SIZE]), CryptoError> {
     let secret = P521Secret::random(&mut rand::rngs::OsRng);
     let scalar = secret.to_nonzero_scalar();
@@ -164,7 +153,7 @@ pub fn crypto_p521_keypair() -> Result<([u8; P521_KEY_SIZE], [u8; P521_SECRET_SI
     Ok((public_bytes, secret_bytes))
 }
 
-//MARK: crypto_p521_shared_secret
+// MARK: crypto_p521_shared_secret
 pub fn crypto_p521_shared_secret(
     their_public: &[u8; P521_KEY_SIZE], 
     my_private: &[u8; P521_SECRET_SIZE]
@@ -182,9 +171,7 @@ pub fn crypto_p521_shared_secret(
         .map_err(|_| CryptoError::KeyGenerationFailed)
 }
 
-//MARK: SLH-DSA (SPHINCS+) wrappers using FIPS-205 slh_dsa_shake_256f
-
-/// Generate SLH-DSA keypair (SPHINCS+-SHAKE-256f)
+// MARK: crypto_slh_dsa_keypair
 pub fn crypto_slh_dsa_keypair() -> Result<([u8; SLH_DSA_PUBKEYBYTES], [u8; SLH_DSA_SECRETKEYBYTES]), CryptoError> {
     let (pk, sk) = slh_dsa_shake_256f::try_keygen_with_rng(&mut OsRng)
         .map_err(|_| CryptoError::KeyGenerationFailed)?;
@@ -193,8 +180,7 @@ pub fn crypto_slh_dsa_keypair() -> Result<([u8; SLH_DSA_PUBKEYBYTES], [u8; SLH_D
     Ok((pk_bytes, sk_bytes))
 }
 
-//MARK: crypto_slh_dsa_sign
-/// Sign message with SLH-DSA. `aad` is optional associated data for domain separation; pass empty slice if unused.
+// MARK: crypto_slh_dsa_sign
 pub fn crypto_slh_dsa_sign(
     secret_key: &[u8; SLH_DSA_SECRETKEYBYTES],
     message: &[u8],
@@ -209,8 +195,7 @@ pub fn crypto_slh_dsa_sign(
     Ok(signature)
 }
 
-//MARK: crypto_slh_dsa_verify
-/// Verify SLH-DSA signature. Returns true if valid.
+// MARK: crypto_slh_dsa_verify
 pub fn crypto_slh_dsa_verify(
     public_key: &[u8; SLH_DSA_PUBKEYBYTES],
     message: &[u8],

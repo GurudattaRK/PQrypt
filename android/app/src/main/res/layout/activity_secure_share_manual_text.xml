@@ -170,77 +170,8 @@
             android:layout_marginBottom="16dp"
             android:visibility="gone" />
 
-        <!-- Step 2: Open other party's key and auto-generate response -->
-        <Button
-            android:id="@+id/btn_step2"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="Step 2: Open Key File &amp; Auto-Generate Response"
-            android:textSize="16sp"
-            android:padding="12dp"
-            android:layout_marginBottom="8dp"
-            android:enabled="false"
-            style="@style/Widget.Material3.Button"
-            android:backgroundTint="#2196F3"
-            android:textColor="@android:color/white" />
 
-        <TextView
-            android:id="@+id/tv_step2_result"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text=""
-            android:textSize="12sp"
-            android:textColor="#666666"
-            android:layout_marginBottom="16dp"
-            android:visibility="gone" />
 
-        <!-- Step 3: Final key or text operation -->
-        <Button
-            android:id="@+id/btn_step3"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="Step 3: Generate Final Key"
-            android:textSize="16sp"
-            android:padding="12dp"
-            android:layout_marginBottom="8dp"
-            android:enabled="false"
-            style="@style/Widget.Material3.Button"
-            android:backgroundTint="#FF5722"
-            android:textColor="@android:color/white" />
-
-        <TextView
-            android:id="@+id/tv_step3_result"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text=""
-            android:textSize="12sp"
-            android:textColor="#666666"
-            android:layout_marginBottom="16dp"
-            android:visibility="gone" />
-
-        <!-- Step 4: Text encryption/decryption -->
-        <Button
-            android:id="@+id/btn_step4"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="Step 4: Choose Encrypted Text File"
-            android:textSize="16sp"
-            android:padding="12dp"
-            android:layout_marginBottom="8dp"
-            android:enabled="false"
-            style="@style/Widget.Material3.Button"
-            android:backgroundTint="#9C27B0"
-            android:textColor="@android:color/white" />
-
-        <TextView
-            android:id="@+id/tv_step4_result"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text=""
-            android:textSize="12sp"
-            android:textColor="#666666"
-            android:layout_marginBottom="16dp"
-            android:visibility="gone" />
 
         <TextView
             android:id="@+id/tv_output_folder"

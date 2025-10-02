@@ -3,45 +3,30 @@
 #include <cstring>
 #include "c_ffi.h"
 
-#define LOG_TAG "RustyCrypto"
-#define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
-#define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
 
-// Constants
 #define ARGON2_SALT_SIZE 32
 #define KYBER_PUBLICKEYBYTES 1568
 #define KYBER_SECRETKEYBYTES 3168
 #define X448_KEY_SIZE 56
 
-// Global JavaVM pointer for thread attachment
 static JavaVM* g_jvm = nullptr;
 
-// JNI OnLoad function to cache JavaVM
 extern "C" JNIEXPORT jint JNICALL
 JNI_OnLoad(JavaVM* vm, void* reserved) {
     g_jvm = vm;
     return JNI_VERSION_1_6;
 }
 
-// =============================
-// New FD-based file crypto APIs
-// =============================
 
 extern "C" JNIEXPORT jint JNICALL
 Java_com_pqrypt_app_RustyCrypto_tripleEncryptFd(JNIEnv *env, jclass, jbyteArray secret, jboolean isKeyFile, jint inFd, jint outFd) {
-    __android_log_print(ANDROID_LOG_DEBUG, LOG_TAG, "JNI tripleEncryptFd: ENTRY - inFd=%d, outFd=%d, isKeyFile=%d", (int)inFd, (int)outFd, (int)isKeyFile);
-    
     if (!secret || inFd < 0 || outFd < 0) {
-        __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, "JNI tripleEncryptFd: Invalid input parameters");
         return CRYPTO_ERROR_INVALID_INPUT;
     }
 
     jsize secretLen = env->GetArrayLength(secret);
-    __android_log_print(ANDROID_LOG_DEBUG, LOG_TAG, "JNI tripleEncryptFd: secretLen=%d", (int)secretLen);
-    
     jbyte* secretBytes = env->GetByteArrayElements(secret, nullptr);
     if (!secretBytes || secretLen <= 0) {
-        __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, "JNI tripleEncryptFd: Failed to get secret bytes");
         if (secretBytes) env->ReleaseByteArrayElements(secret, secretBytes, JNI_ABORT);
         return CRYPTO_ERROR_INVALID_INPUT;
     }
@@ -52,14 +37,7 @@ Java_com_pqrypt_app_RustyCrypto_tripleEncryptFd(JNIEnv *env, jclass, jbyteArray 
     memset(secretBytes, 0, secretLen);
     env->ReleaseByteArrayElements(secret, secretBytes, 0);
 
-    __android_log_print(ANDROID_LOG_DEBUG, LOG_TAG, "JNI tripleEncryptFd: About to call triple_encrypt_fd_c");
-    __android_log_print(ANDROID_LOG_DEBUG, LOG_TAG, "JNI tripleEncryptFd: Parameters - secretCopy=%p, secretLen=%d, isKeyFile=%d, inFd=%d, outFd=%d", 
-                       secretCopy, (int)secretLen, isKeyFile ? 1 : 0, (int)inFd, (int)outFd);
-    
-    __android_log_print(ANDROID_LOG_DEBUG, LOG_TAG, "JNI tripleEncryptFd: CALLING triple_encrypt_fd_c NOW");
     int res = triple_encrypt_fd_c(secretCopy, (unsigned long)secretLen, isKeyFile ? 1 : 0, (int)inFd, (int)outFd);
-    __android_log_print(ANDROID_LOG_DEBUG, LOG_TAG, "JNI tripleEncryptFd: triple_encrypt_fd_c returned %d", res);
-    
     // Zero and free native buffer
     memset(secretCopy, 0, secretLen);
     delete [] secretCopy;
@@ -90,9 +68,6 @@ Java_com_pqrypt_app_RustyCrypto_tripleDecryptFd(JNIEnv *env, jclass, jbyteArray 
     return res;
 }
 
-// =====================================
-// Unified password generator (bitmask)
-// =====================================
 
 extern "C" JNIEXPORT jstring JNICALL
 Java_com_pqrypt_app_RustyCrypto_generatePasswordUnified(JNIEnv *env, jclass, jbyteArray appName, jbyteArray appPassword, jbyteArray masterPassword, jint desiredLen, jint enabledSetsMask) {
@@ -121,7 +96,6 @@ Java_com_pqrypt_app_RustyCrypto_generatePasswordUnified(JNIEnv *env, jclass, jby
         (size_t)desiredLen, (unsigned int)enabledSetsMask,
         outBuf, &outLen);
 
-    // Zero Java arrays in-place
     memset(appBytes, 0, appLen);
     env->ReleaseByteArrayElements(appName, appBytes, 0);
     if (pwdBytes) { memset(pwdBytes, 0, pwdLen); env->ReleaseByteArrayElements(appPassword, pwdBytes, 0); }
@@ -132,15 +106,12 @@ Java_com_pqrypt_app_RustyCrypto_generatePasswordUnified(JNIEnv *env, jclass, jby
     return env->NewStringUTF(outBuf);
 }
 
-// (moved below helper functions)
 
-// Helper to get JNIEnv for current thread
 static JNIEnv* getEnv() {
     JNIEnv* env = nullptr;
     if (g_jvm) {
         int status = g_jvm->GetEnv(reinterpret_cast<void**>(&env), JNI_VERSION_1_6);
         if (status == JNI_EDETACHED) {
-            // Attach current thread
             if (g_jvm->AttachCurrentThread(&env, nullptr) != JNI_OK) {
                 return nullptr;
             }
@@ -149,7 +120,6 @@ static JNIEnv* getEnv() {
     return env;
 }
 
-// Helper functions
 static uint8_t* jbyteArrayToBytes(JNIEnv *env, jbyteArray array, jsize *length) {
     if (!array) {
         *length = 0;
@@ -183,7 +153,6 @@ static jbyteArray bytesToJbyteArray(JNIEnv *env, const uint8_t *bytes, jsize len
     return result;
 }
 
-// Unified 128-byte password derivation JNI (placed after helper functions)
 extern "C" JNIEXPORT jbyteArray JNICALL
 Java_com_pqrypt_app_RustyCrypto_derivePasswordHashUnified128(JNIEnv *env, jclass clazz, jbyteArray appName, jbyteArray appPassword, jbyteArray masterPassword) {
     if (!appName || !masterPassword) {
@@ -220,11 +189,8 @@ Java_com_pqrypt_app_RustyCrypto_derivePasswordHashUnified128(JNIEnv *env, jclass
     return bytesToJbyteArray(env, out, 128);
 }
 
-// Core JNI functions - simplified names
 extern "C" JNIEXPORT jbyteArray JNICALL
 Java_com_pqrypt_app_RustyCrypto_argon2Hash(JNIEnv *env, jclass clazz, jbyteArray password, jbyteArray salt, jint outputLength) {
-    // This function is deprecated - use derivePasswordHashUnified128 instead
-    // For backward compatibility, we'll implement a simple fallback
     jsize passwordLen;
     uint8_t *passwordBytes = jbyteArrayToBytes(env, password, &passwordLen);
     
@@ -235,11 +201,10 @@ Java_com_pqrypt_app_RustyCrypto_argon2Hash(JNIEnv *env, jclass clazz, jbyteArray
     jsize outLen = outputLength > 0 ? outputLength : 32;
     uint8_t *hashBuf = new uint8_t[outLen];
     
-    // Use the unified derivation with empty app name and app password
     int result = derive_password_hash_unified_128_c(
-        (const unsigned char*)"", 0,  // empty app name
-        (const unsigned char*)"", 0,  // empty app password
-        passwordBytes, passwordLen,    // master password = input password
+        (const unsigned char*)"", 0,
+        (const unsigned char*)"", 0,
+        passwordBytes, passwordLen,
         hashBuf, outLen
     );
     
@@ -255,18 +220,12 @@ Java_com_pqrypt_app_RustyCrypto_argon2Hash(JNIEnv *env, jclass clazz, jbyteArray
     return resultArray;
 }
 
-// Removed tripleDecrypt - use tripleDecryptFd instead
-
-// Removed generatePasswordSecure - use generatePasswordUnified instead
-
-
-// PQC 4-Algorithm Hybrid Key Exchange Functions
 
 extern "C" JNIEXPORT jobjectArray JNICALL
 Java_com_pqrypt_app_RustyCrypto_pqc4HybridInit(JNIEnv *env, jclass clazz) {
-    uint8_t hybrid1Key[131072]; // Large buffer for signed hybrid key (1.key)
+    uint8_t hybrid1Key[131072];
     size_t hybrid1KeyLen = 0;
-    uint8_t senderState[65536]; // Large buffer for sender state (includes SLH-DSA keys)
+    uint8_t senderState[65536];
     size_t senderStateLen = 0;
     
     int status = pqc_4hybrid_init_c(hybrid1Key, &hybrid1KeyLen, senderState, &senderStateLen);
@@ -303,42 +262,33 @@ Java_com_pqrypt_app_RustyCrypto_pqc4HybridInit(JNIEnv *env, jclass clazz) {
 
 extern "C" JNIEXPORT jobjectArray JNICALL
 Java_com_pqrypt_app_RustyCrypto_pqc4HybridRecv(JNIEnv *env, jclass clazz, jbyteArray hybrid1Key) {
-    LOGI("pqc4HybridRecv: ENTRY - Function called");
     jsize hybrid1KeyLen;
     uint8_t *hybrid1KeyBytes = jbyteArrayToBytes(env, hybrid1Key, &hybrid1KeyLen);
     
-    LOGI("pqc4HybridRecv: hybrid1KeyLen=%d", hybrid1KeyLen);
-    
     if (!hybrid1KeyBytes) {
-        LOGE("pqc4HybridRecv: hybrid1Key is null");
         return nullptr;
     }
     
-    uint8_t hybrid2Key[131072]; // Increased buffer for signed hybrid2 key (2.key)
+    uint8_t hybrid2Key[131072];
     size_t hybrid2KeyLen = 0;
-    uint8_t receiverState[65536]; // Increased buffer for receiver state (includes SLH-DSA keys)
+    uint8_t receiverState[65536];
     size_t receiverStateLen = 0;
     
     int result = pqc_4hybrid_recv_c(hybrid1KeyBytes, hybrid1KeyLen, hybrid2Key, &hybrid2KeyLen, receiverState, &receiverStateLen);
     
-    LOGI("pqc4HybridRecv: pqc_4hybrid_recv_c returned %d, hybrid2KeyLen=%zu, receiverStateLen=%zu", result, hybrid2KeyLen, receiverStateLen);
-    
     delete[] hybrid1KeyBytes;
     
     if (result != CRYPTO_SUCCESS) {
-        LOGE("pqc4HybridRecv: pqc_4hybrid_recv_c failed with error %d", result);
         return nullptr;
     }
     
     jclass byteArrayClass = env->FindClass("[B");
     if (!byteArrayClass) {
-        LOGE("pqc4HybridRecv: Failed to find byte array class");
         return nullptr;
     }
     
     jobjectArray resultArray = env->NewObjectArray(2, byteArrayClass, nullptr);
     if (!resultArray) {
-        LOGE("pqc4HybridRecv: Failed to create result array");
         return nullptr;
     }
     
@@ -346,7 +296,6 @@ Java_com_pqrypt_app_RustyCrypto_pqc4HybridRecv(JNIEnv *env, jclass clazz, jbyteA
     jbyteArray j_receiverState = bytesToJbyteArray(env, receiverState, (jsize)receiverStateLen);
     
     if (!j_hybrid2Key || !j_receiverState) {
-        LOGE("pqc4HybridRecv: Failed to create byte arrays");
         return nullptr;
     }
     
@@ -356,7 +305,6 @@ Java_com_pqrypt_app_RustyCrypto_pqc4HybridRecv(JNIEnv *env, jclass clazz, jbyteA
     env->DeleteLocalRef(j_hybrid2Key);
     env->DeleteLocalRef(j_receiverState);
     
-    LOGI("pqc4HybridRecv: Successfully returning result array");
     return resultArray;
 }
 
@@ -366,40 +314,32 @@ Java_com_pqrypt_app_RustyCrypto_pqc4HybridSndFinal(JNIEnv *env, jclass clazz, jb
     uint8_t *hybrid2KeyBytes = jbyteArrayToBytes(env, hybrid2Key, &hybrid2KeyLen);
     uint8_t *senderStateBytes = jbyteArrayToBytes(env, senderState, &senderStateLen);
     
-    LOGI("pqc4HybridSndFinal: hybrid2KeyLen=%d, senderStateLen=%d", hybrid2KeyLen, senderStateLen);
-    
     if (!hybrid2KeyBytes || !senderStateBytes) {
-        LOGE("pqc4HybridSndFinal: Input arrays are null");
         delete[] hybrid2KeyBytes;
         delete[] senderStateBytes;
         return nullptr;
     }
     
-    uint8_t finalKey[128]; // 128-byte final key
-    uint8_t hybrid3Key[131072]; // Increased buffer for signed hybrid3 key (3.key)
+    uint8_t finalKey[128];
+    uint8_t hybrid3Key[131072];
     size_t hybrid3KeyLen = 0;
     
     int result = pqc_4hybrid_snd_final_c(hybrid2KeyBytes, hybrid2KeyLen, senderStateBytes, senderStateLen, finalKey, hybrid3Key, &hybrid3KeyLen);
-    
-    LOGI("pqc4HybridSndFinal: pqc_4hybrid_snd_final_c returned %d, hybrid3KeyLen=%zu", result, hybrid3KeyLen);
     
     delete[] hybrid2KeyBytes;
     delete[] senderStateBytes;
     
     if (result != CRYPTO_SUCCESS) {
-        LOGE("pqc4HybridSndFinal: pqc_4hybrid_snd_final_c failed with error %d", result);
         return nullptr;
     }
     
     jclass byteArrayClass = env->FindClass("[B");
     if (!byteArrayClass) {
-        LOGE("pqc4HybridSndFinal: Failed to find byte array class");
         return nullptr;
     }
     
     jobjectArray resultArray = env->NewObjectArray(2, byteArrayClass, nullptr);
     if (!resultArray) {
-        LOGE("pqc4HybridSndFinal: Failed to create result array");
         return nullptr;
     }
     
@@ -407,7 +347,6 @@ Java_com_pqrypt_app_RustyCrypto_pqc4HybridSndFinal(JNIEnv *env, jclass clazz, jb
     jbyteArray j_hybrid3Key = bytesToJbyteArray(env, hybrid3Key, (jsize)hybrid3KeyLen);
     
     if (!j_finalKey || !j_hybrid3Key) {
-        LOGE("pqc4HybridSndFinal: Failed to create byte arrays");
         return nullptr;
     }
     
@@ -417,7 +356,6 @@ Java_com_pqrypt_app_RustyCrypto_pqc4HybridSndFinal(JNIEnv *env, jclass clazz, jb
     env->DeleteLocalRef(j_finalKey);
     env->DeleteLocalRef(j_hybrid3Key);
     
-    LOGI("pqc4HybridSndFinal: Successfully returning result array");
     return resultArray;
 }
 

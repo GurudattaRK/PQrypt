@@ -58,6 +58,7 @@ class PasswordVaultActivity : AppCompatActivity() { // UI to derive, display, an
 
     override fun onCreate(savedInstanceState: Bundle?) { // Activity entry point
         super.onCreate(savedInstanceState)
+        
         binding = ActivityPasswordVaultBinding.inflate(layoutInflater) // Inflate binding
         setContentView(binding.root) // Attach layout
 
@@ -73,7 +74,6 @@ class PasswordVaultActivity : AppCompatActivity() { // UI to derive, display, an
 
     // Clears local timers and UI, and sensitive locals, but DOES NOT clear the Autofill service's pending password.
     private fun clearLocalStatePreservingAutofillService() { // Reset local sensitive state; keep service password
-        // // Log.d("PasswordVault", "Clearing local state (preserving Autofill service)") // Trace
 
         // Stop timers
         clearPasswordRunnable?.let { clearPasswordHandler?.removeCallbacks(it) } // Cancel clear callback
@@ -103,7 +103,6 @@ class PasswordVaultActivity : AppCompatActivity() { // UI to derive, display, an
         // Let the service timer handle clearing; only clear local state here.
         clearLocalStatePreservingAutofillService() // Reset local sensitive data
         
-        // // Log.d("PasswordVault", "Activity destroyed, all operations cancelled")
     }
 
     override fun onPause() { // When app goes to background
@@ -197,7 +196,6 @@ class PasswordVaultActivity : AppCompatActivity() { // UI to derive, display, an
             startActivity(Intent(this, PasswordSettingsActivity::class.java)) // Navigate
         }
 
-
         // Unsafe clipboard copy button with security warning
         binding.btnUnsafeClipboardCopy.setOnClickListener { // Allow copying to clipboard (discouraged), with warning
             showClipboardSecurityWarning() // Show warning and handle copy+wipe
@@ -220,20 +218,16 @@ class PasswordVaultActivity : AppCompatActivity() { // UI to derive, display, an
     private var passwordGenerationJob: kotlinx.coroutines.Job? = null
     
     private fun generateFinalPassword() { // Main flow to produce and expose password for Autofill
-        // Log.d("PasswordVault", "generateFinalPassword: start") // Trace
         
         // Cancel any existing password generation to prevent concurrent operations
         passwordGenerationJob?.cancel()
         
-        // Log.d("PasswordVault", "Native library check starting...")
         
         // Check if native library is loaded before proceeding
         if (!checkNativeLibrary()) {
-            // Log.e("PasswordVault", "Native library check failed")
             Toast.makeText(this, "Error: Native library not available. Please restart the app.", Toast.LENGTH_LONG).show()
             return
         }
-        // Log.d("PasswordVault", "Native library check passed")
         
         // Clear any existing password data first
         clearAllPasswordData() // Ensure clean slate and cancel timers
@@ -259,7 +253,6 @@ class PasswordVaultActivity : AppCompatActivity() { // UI to derive, display, an
         // Run all Argon2 operations on background thread to prevent UI blocking and crashes
         passwordGenerationJob = CoroutineScope(Dispatchers.IO).launch {
             try {
-                // Log.d("PasswordVault", "Starting unified 128-byte derivation on background thread")
                 val finalHash = RustyCrypto.derivePasswordHashUnified128(
                     appName.toByteArray(),
                     appPassword.toByteArray(),
@@ -267,7 +260,6 @@ class PasswordVaultActivity : AppCompatActivity() { // UI to derive, display, an
                 )
                 if (!isActive) return@launch
                 if (finalHash == null || finalHash.size != 128) {
-                    // Log.e("PasswordVault", "Unified 128-byte derivation failed or invalid size: ${finalHash?.size}")
                     withContext(Dispatchers.Main) {
                         binding.btnGeneratePassword.isEnabled = true
                         binding.btnGeneratePassword.text = "Generate Password"
@@ -279,13 +271,11 @@ class PasswordVaultActivity : AppCompatActivity() { // UI to derive, display, an
                 // Check if cancelled before password generation
                 if (!isActive) return@launch
 
-                // Log.d("PasswordVault", "Unified hash successful, result size: ${finalHash.size}")
                 
                 // Store for later use
                 finalPasswordHash = finalHash
                 
                 // Generate password using unified API (bitmask for specials)
-                // Log.d("PasswordVault", "About to call RustyCrypto.generatePasswordUnified")
                 var specialsMask = 0
                 enabledSpecialSets.forEachIndexed { index, enabled ->
                     if (enabled) {
@@ -304,7 +294,6 @@ class PasswordVaultActivity : AppCompatActivity() { // UI to derive, display, an
                 // Switch back to main thread for UI updates
                 withContext(Dispatchers.Main) {
                     if (generatedPassword.isNullOrEmpty()) {
-                        // Log.e("PasswordVault", "Generated password is null or empty")
                         binding.btnGeneratePassword.isEnabled = true
                         binding.btnGeneratePassword.text = "Generate Password"
                         Toast.makeText(this@PasswordVaultActivity, "Error: Password generation failed", Toast.LENGTH_SHORT).show()
@@ -315,26 +304,24 @@ class PasswordVaultActivity : AppCompatActivity() { // UI to derive, display, an
                     PQryptAutofillService.setPasswordForAutofill(generatedPassword)
                     currentGeneratedPassword = generatedPassword
                     
-                    // Display password
-                    binding.tvGeneratedPassword.text = "Password: $generatedPassword\n\n⏱️ Available for Autofill. Will be cleared in 60 seconds"
-                    Toast.makeText(this@PasswordVaultActivity, "Password ready for Autofill. Will be cleared in 60 seconds.", Toast.LENGTH_LONG).show()
+                    // Display the generated password
+                    binding.tvGeneratedPassword.text = generatedPassword
+                    binding.btnUnsafeClipboardCopy.visibility = View.VISIBLE
                     
-                    // Show the unsafe clipboard copy button
-                    binding.btnUnsafeClipboardCopy.visibility = android.view.View.VISIBLE
+                    // Clear password after 60 seconds for security
+                    clearPasswordHandler?.removeCallbacksAndMessages(null)
+                    clearPasswordHandler?.postDelayed({
+                        currentGeneratedPassword = null
+                        binding.tvGeneratedPassword.text = "🔒 Password cleared for security"
+                        binding.btnUnsafeClipboardCopy.visibility = View.GONE
+                        Toast.makeText(this@PasswordVaultActivity, "Password cleared from memory", Toast.LENGTH_SHORT).show()
+                    }, 60000)
                     
-                    // Start 60-second countdown and auto-clear
-                    startPasswordClearCountdown()
-                    
-                    // Optionally save to stored passwords
-                    savePasswordIfRequested(generatedPassword)
-                    
-                    // Log.d("PasswordVault", "Password generation and display complete")
                     binding.btnGeneratePassword.isEnabled = true
                     binding.btnGeneratePassword.text = "Generate Password"
                 }
                 
             } catch (e: Exception) {
-                // Log.e("PasswordVault", "Error in password generation", e)
                 withContext(Dispatchers.Main) {
                     binding.btnGeneratePassword.isEnabled = true
                     binding.btnGeneratePassword.text = "Generate Password"
@@ -380,7 +367,6 @@ class PasswordVaultActivity : AppCompatActivity() { // UI to derive, display, an
     }
 
     private fun clearAllPasswordData() { // Wipe generated secrets, timers, UI, and Autofill pending value
-        // Log.d("PasswordVault", "Clearing all password data") // Trace
         
         clearPasswordRunnable?.let { clearPasswordHandler?.removeCallbacks(it) } // Cancel clear timer
         countdownRunnable?.let { countdownHandler?.removeCallbacks(it) } // Cancel countdown
@@ -408,7 +394,6 @@ class PasswordVaultActivity : AppCompatActivity() { // UI to derive, display, an
         
         Toast.makeText(this, "🔒 All password data cleared from memory", Toast.LENGTH_SHORT).show() // Notify
         
-        // Log.d("PasswordVault", "Password data clearing completed") // Trace
     }
 
     private fun savePasswordIfRequested(password: String) { // Persist entry if user opted in (note: plaintext SharedPreferences)
@@ -476,10 +461,8 @@ class PasswordVaultActivity : AppCompatActivity() { // UI to derive, display, an
             RustyCrypto.argon2Hash(testPassword, testSalt, 32) // Should succeed
             true // JNI OK
         } catch (e: UnsatisfiedLinkError) {
-            // Log.e("PasswordVault", "Native library not loaded", e) // JNI missing
             false
         } catch (e: Exception) {
-            // Log.e("PasswordVault", "Error testing native library", e) // Other failure
             false
         }
     }
@@ -531,7 +514,6 @@ class PasswordVaultActivity : AppCompatActivity() { // UI to derive, display, an
                 Toast.makeText(this, "Autofill service requires Android 8.0 or higher", Toast.LENGTH_LONG).show()
             }
         } catch (e: Exception) {
-            // Log.e("PasswordVault", "Error opening autofill settings", e)
             // Fallback to general settings
             try {
                 val intent = Intent(Settings.ACTION_SETTINGS)
