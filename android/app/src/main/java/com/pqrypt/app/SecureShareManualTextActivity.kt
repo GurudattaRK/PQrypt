@@ -148,24 +148,24 @@ class SecureShareManualTextActivity : AppCompatActivity() {
         // Update main action button
         binding.btnStep1.text = when {
             isSender && currentStep == 1 -> "Generate 1.key"
-            isSender && currentStep == 2 -> "Open 2.key (will auto-encrypt)"
-            !isSender && currentStep == 1 -> "Open 1.key (will auto-generate 2.key)"
-            !isSender && currentStep == 2 -> "Open 3.key (will auto-generate final.key)"
-            !isSender && currentStep == 3 -> "Open Encrypted Text (will auto-decrypt)"
-            else -> "Complete"
+            isSender && currentStep == 2 -> "Open 2.key from Receiver"
+            !isSender && currentStep == 1 -> "Open 1.key from Sender"
+            !isSender && currentStep == 2 -> "Open 3.key from Sender"
+            !isSender && currentStep == 3 -> "Open Encrypted Text File"
+            else -> "Process Complete"
         }
         
         binding.btnStep1.isEnabled = currentStep <= 3
         
         // Update status text
         binding.tvStatus.text = when {
-            isSender && currentStep == 1 -> "Enter text and generate 1.key to start"
-            isSender && currentStep == 2 -> "Open 2.key from receiver to continue"
-            isSender && currentStep > 2 -> "Text encrypted! Share 3.key and encrypted file"
-            !isSender && currentStep == 1 -> "Open 1.key from sender to start"
-            !isSender && currentStep == 2 -> "Open 3.key from sender to continue"
-            !isSender && currentStep == 3 -> "Open encrypted text file to decrypt"
-            else -> "Process complete!"
+            isSender && currentStep == 1 -> "Step 1: Enter your text message above, then press 'Generate 1.key' button"
+            isSender && currentStep == 2 -> "Step 2: Send 1.key to receiver and wait for their 2.key. Once received, press 'Open 2.key from Receiver' button"
+            isSender && currentStep > 2 -> "✅ Success! Your text has been encrypted. Send both 3.key and the encrypted text file to the receiver"
+            !isSender && currentStep == 1 -> "Step 1: Wait for sender's 1.key file. Once received, press 'Open 1.key from Sender' button (2.key will auto-generate)"
+            !isSender && currentStep == 2 -> "Step 2: Send 2.key to sender and wait for their 3.key. Once received, press 'Open 3.key from Sender' button"
+            !isSender && currentStep == 3 -> "Step 3: Wait for encrypted text file from sender. Once received, press 'Open Encrypted Text File' button to decrypt"
+            else -> "✅ Process complete! Message successfully decrypted"
         }
     }
 
@@ -182,7 +182,7 @@ class SecureShareManualTextActivity : AppCompatActivity() {
                 
                 withContext(Dispatchers.Main) {
                     saveKeyFile(publicKey, "1.key")
-                    binding.tvStep1Result.text = "1.key generated - Share with receiver"
+                    binding.tvStep1Result.text = "✅ 1.key generated successfully! Send this file to the receiver"
                     binding.tvStep1Result.visibility = View.VISIBLE
                     currentStep = 2
                     updateUI()
@@ -217,7 +217,7 @@ class SecureShareManualTextActivity : AppCompatActivity() {
                         withContext(Dispatchers.Main) {
                             if (response.isNotEmpty()) {
                                 saveKeyFile(response, "2.key")
-                                binding.tvStep1Result.text = "2.key auto-generated - Share with sender"
+                                binding.tvStep1Result.text = "✅ 2.key generated automatically! Send this file to the sender"
                                 binding.tvStep1Result.visibility = View.VISIBLE
                                 currentStep = 2
                                 updateUI()
@@ -243,7 +243,7 @@ class SecureShareManualTextActivity : AppCompatActivity() {
                         withContext(Dispatchers.Main) {
                             saveKeyFile(result3Key, "3.key")
                             saveKeyFile(finalSharedSecret!!, "final.key")
-                            binding.tvStep1Result.text = "Keys generated - Auto-encrypting text..."
+                            binding.tvStep1Result.text = "✅ 3.key and final.key generated! Encrypting your text message..."
                             binding.tvStep1Result.visibility = View.VISIBLE
                             
                             // Auto-encrypt text

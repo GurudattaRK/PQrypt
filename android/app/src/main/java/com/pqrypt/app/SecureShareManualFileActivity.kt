@@ -155,11 +155,11 @@ class SecureShareManualFileActivity : AppCompatActivity() {
         // Update main action button
         binding.btnStep1.text = when {
             isSender && currentStep == 1 -> "Generate 1.key"
-            isSender && currentStep == 2 -> "Open 2.key (will auto-encrypt)"
-            !isSender && currentStep == 1 -> "Open 1.key (will auto-generate 2.key)"
-            !isSender && currentStep == 2 -> "Open 3.key (will auto-generate final.key)"
-            !isSender && currentStep == 3 -> "Open Encrypted File (will auto-decrypt)"
-            else -> "Complete"
+            isSender && currentStep == 2 -> "Open 2.key from Receiver"
+            !isSender && currentStep == 1 -> "Open 1.key from Sender"
+            !isSender && currentStep == 2 -> "Open 3.key from Sender"
+            !isSender && currentStep == 3 -> "Open Encrypted File"
+            else -> "Process Complete"
         }
         
         binding.btnStep1.isEnabled = when {
@@ -170,13 +170,13 @@ class SecureShareManualFileActivity : AppCompatActivity() {
         
         // Update status text
         binding.tvStatus.text = when {
-            isSender && currentStep == 1 -> "Select file and generate 1.key to start"
-            isSender && currentStep == 2 -> "Open 2.key from receiver to continue"
-            isSender && currentStep > 2 -> "File encrypted! Share 3.key and encrypted file"
-            !isSender && currentStep == 1 -> "Open 1.key from sender to start"
-            !isSender && currentStep == 2 -> "Open 3.key from sender to continue"
-            !isSender && currentStep == 3 -> "Open encrypted file to decrypt"
-            else -> "Process complete!"
+            isSender && currentStep == 1 -> "Step 1: Press 'Choose File' to select a file, then press 'Generate 1.key' button"
+            isSender && currentStep == 2 -> "Step 2: Send 1.key to receiver and wait for their 2.key. Once received, press 'Open 2.key from Receiver' button"
+            isSender && currentStep > 2 -> "✅ Success! Your file has been encrypted. Send both 3.key and the encrypted file to the receiver"
+            !isSender && currentStep == 1 -> "Step 1: Wait for sender's 1.key file. Once received, press 'Open 1.key from Sender' button (2.key will auto-generate)"
+            !isSender && currentStep == 2 -> "Step 2: Send 2.key to sender and wait for their 3.key. Once received, press 'Open 3.key from Sender' button"
+            !isSender && currentStep == 3 -> "Step 3: Wait for encrypted file from sender. Once received, press 'Open Encrypted File' button to decrypt"
+            else -> "✅ Process complete! File successfully decrypted"
         }
     }
 
@@ -196,7 +196,7 @@ class SecureShareManualFileActivity : AppCompatActivity() {
                 
                 withContext(Dispatchers.Main) {
                     queueSaveAndPersist("1.key", publicKey, "1.key generated successfully")
-                    binding.tvStep1Result.text = "1.key generated - Share with receiver"
+                    binding.tvStep1Result.text = "✅ 1.key generated successfully! Send this file to the receiver"
                     binding.tvStep1Result.visibility = View.VISIBLE
                     currentStep = 2
                     updateUI()

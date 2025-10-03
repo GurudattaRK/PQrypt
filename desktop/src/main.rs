@@ -231,9 +231,9 @@ fn main() -> Result<(), slint::PlatformError> {
             let full_path = path.canonicalize().unwrap_or(path);
             ui.set_key_file_path(full_path.to_string_lossy().to_string().into());
             if ui.get_sender() {
-                ui.set_status_text("Sender - Step 3: Open 2.key, then Generate 3.key and send 3.key to Receiver.".into());
+                ui.set_status_text("Step 2: Great! 2.key loaded. Now press 'Generate Key File' button to create 3.key".into());
             } else {
-                ui.set_status_text("Receiver - Step 2: Open 1.key, then Generate 2.key and send 2.key to Sender.".into());
+                ui.set_status_text("Step 1: Great! 1.key loaded. Now press 'Generate Key File' button to create 2.key".into());
             }
         }
     });
@@ -263,8 +263,8 @@ fn main() -> Result<(), slint::PlatformError> {
                         let full_path = std::path::Path::new("1.key")
                             .canonicalize()
                             .unwrap_or_else(|_| std::path::PathBuf::from("1.key"));
-                        ui.set_generated_key_path(std::format!("{} - Send this to Receiver", full_path.to_string_lossy()).into());
-                        ui.set_status_text("Sender - Step 1 complete. Generated 1.key. Step 2: Send 1.key to Receiver.".into());
+                        ui.set_generated_key_path(std::format!("✅ {}", full_path.to_string_lossy()).into());
+                        ui.set_status_text("Step 1 complete! Send 1.key to receiver and wait for their 2.key. Then press 'Open Key File' to load 2.key".into());
                     }
                     Err(e) => ui.set_generated_key_path(std::format!("Error: {}", e).into()),
                 }
@@ -283,8 +283,8 @@ fn main() -> Result<(), slint::PlatformError> {
                                             let full_path = std::path::Path::new("3.key")
                                                 .canonicalize()
                                                 .unwrap_or_else(|_| std::path::PathBuf::from("3.key"));
-                                            ui.set_generated_key_path(std::format!("{} - Send this to Receiver", full_path.to_string_lossy()).into());
-                                            ui.set_status_text("Sender - Step 3 complete. Generated 3.key. Step 4: Send 3.key to Receiver.".into());
+                                            ui.set_generated_key_path(std::format!("✅ {}", full_path.to_string_lossy()).into());
+                                            ui.set_status_text("Step 2 complete! Send 3.key to receiver, then press 'Generate Key File' again to create your final.key".into());
                                         }
                                         Err(e) => ui.set_generated_key_path(std::format!("Error: {}", e).into()),
                                     }
@@ -303,8 +303,8 @@ fn main() -> Result<(), slint::PlatformError> {
                             let full_path = std::path::Path::new("final.key")
                                 .canonicalize()
                                 .unwrap_or_else(|_| std::path::PathBuf::from("final.key"));
-                            ui.set_generated_key_path(std::format!("{} - Key exchange complete!", full_path.to_string_lossy()).into());
-                            ui.set_status_text("Key exchange completed successfully!".into());
+                            ui.set_generated_key_path(std::format!("✅ {}", full_path.to_string_lossy()).into());
+                            ui.set_status_text("✅ Success! Key exchange completed. final.key has been saved and can be used for secure communication".into());
                         }
                         Err(e) => ui.set_generated_key_path(std::format!("Error: {}", e).into()),
                     }
@@ -328,8 +328,8 @@ fn main() -> Result<(), slint::PlatformError> {
                                 let full_path = std::path::Path::new("2.key")
                                     .canonicalize()
                                     .unwrap_or_else(|_| std::path::PathBuf::from("2.key"));
-                                ui.set_generated_key_path(std::format!("{} - Send this to Sender", full_path.to_string_lossy()).into());
-                                ui.set_status_text("Receiver - Step 2 complete. Generated 2.key. Step 3: Send 2.key to Sender.".into());
+                                ui.set_generated_key_path(std::format!("✅ {}", full_path.to_string_lossy()).into());
+                                ui.set_status_text("Step 1 complete! Send 2.key to sender and wait for their 3.key. Then press 'Open Key File' to load 3.key".into());
                             }
                             Err(e) => ui.set_generated_key_path(std::format!("Error: {}", e).into()),
                         }
@@ -349,8 +349,8 @@ fn main() -> Result<(), slint::PlatformError> {
                                             let full_path = std::path::Path::new("final.key")
                                                 .canonicalize()
                                                 .unwrap_or_else(|_| std::path::PathBuf::from("final.key"));
-                                            ui.set_generated_key_path(std::format!("{} - Key exchange complete!", full_path.to_string_lossy()).into());
-                                            ui.set_status_text("Receiver - Step 5 complete. Key exchange completed successfully! Saved final.key.".into());
+                                            ui.set_generated_key_path(std::format!("✅ {}", full_path.to_string_lossy()).into());
+                                            ui.set_status_text("✅ Success! Key exchange completed. final.key has been saved and can be used for secure communication".into());
                                         }
                                         Err(e) => ui.set_generated_key_path(std::format!("Error: {}", e).into()),
                                     }

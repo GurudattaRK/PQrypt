@@ -154,7 +154,7 @@ fn start_pqc_exchange(state: &mut SecureShareState, _file_path: Option<String>) 
             let full_path = key_path.canonicalize()
                 .unwrap_or_else(|_| key_path.clone());
             SecureShareResult::success(
-                "Step 2: Generated 1.key. Send it to the receiver.",
+                "Step 1: 1.key generated! Send this file to the receiver and wait for their response",
                 Some(format!("{} - Send this to Receiver", full_path.to_string_lossy()))
             )
         }
@@ -163,15 +163,16 @@ fn start_pqc_exchange(state: &mut SecureShareState, _file_path: Option<String>) 
 }
 
 pub fn start_receiver(state: &mut SecureShareState, mode: &str) -> SecureShareResult {
+    // Reset state when starting as receiver
+    state.reset();
     state.is_sender = false;
     state.mode = mode.to_string();
     state.step = 1;
-    state.pqc_state.step = 0;
-    SecureShareResult::success("Waiting for sender's 1.key file. Use 'Open Sender's Key' when received.", None)
-}
-
-pub fn generate_key(state: &mut SecureShareState, key_file_path: &str) -> SecureShareResult {
-    generate_key_with_file_path(state, key_file_path, None)
+    
+    SecureShareResult::success(
+        "Step 1: Wait for sender's files. Once you receive 1.key, 3.key and encrypted file, press 'Open Key' and select 1.key",
+        None,
+    )
 }
 
 pub fn generate_key_with_file_path(state: &mut SecureShareState, key_file_path: &str, file_path: Option<&str>) -> SecureShareResult {

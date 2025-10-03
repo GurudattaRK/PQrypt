@@ -291,7 +291,7 @@ export component MainWindow inherits Window {
                         current-page = "pqc-exchange-main";
                         // Reset outputs
                         key-file-path = ""; generated-key-path = "";
-                        status-text = "Sender - Step 1: Generate 1.key, then send 1.key to Receiver.";
+                        status-text = "Step 1: Press 'Generate Key File' button to create 1.key";
                     }
                 }
                 
@@ -304,7 +304,7 @@ export component MainWindow inherits Window {
                         current-page = "pqc-exchange-main";
                         // Reset outputs
                         key-file-path = ""; generated-key-path = "";
-                        status-text = "Receiver - Step 1: Open 1.key (sent by Sender).";
+                        status-text = "Step 1: Wait for sender's 1.key file. Once received, press 'Open Key File' button to load it";
                     }
                 }
             }
@@ -762,7 +762,9 @@ export component MainWindow inherits Window {
                         sender = true;
                         current-page = "secure-share-sender";
                         // Clear all labels and text inputs
-                        secure-share-status = "Step 1: Enter content and start key exchange";
+                        secure-share-status = secure-share-mode == "text" ? 
+                            "Step 1: Enter your text message below, then press 'Start Sender' button" : 
+                            "Step 1: Press 'Choose File' to select a file, then press 'Start Sender' button";
                         key-file-path = "";
                         generated-key-path = "";
                         file-path = "";
@@ -780,7 +782,7 @@ export component MainWindow inherits Window {
                         sender = false;
                         current-page = "secure-share-receiver";
                         // Clear all labels and text inputs
-                        secure-share-status = "Step 1: Wait for sender's key file";
+                        secure-share-status = "Step 1: Wait for sender to share their key files and encrypted content with you";
                         key-file-path = "";
                         generated-key-path = "";
                         file-path = "";

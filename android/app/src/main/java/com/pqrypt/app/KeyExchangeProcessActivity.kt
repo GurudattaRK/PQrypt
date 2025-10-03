@@ -128,18 +128,20 @@ class KeyExchangeProcessActivity : AppCompatActivity() { // Guided UI for 3-mess
     private fun updateStatus() { // Update status text based on role and current step
         val role = if (isSender) "Sender" else "Receiver" // Prefix role label
         val stepDescription = when { // Compute instruction for the current state
-            isSender && currentStep == 1 -> "Generate 1.key"
-            isSender && currentStep == 2 && receiverResponseBundle == null -> "Read 2.key (from receiver)"
-            isSender && currentStep == 2 && receiverResponseBundle != null && senderFinalBundle == null -> "Press Generate to create 3.key"
-            isSender && currentStep == 3 && senderFinalBundle != null && finalSharedSecret == null -> "Send 3.key to receiver, then press Generate to create final.key"
-            !isSender && currentStep == 1 && senderKyberPk == null -> "Read 1.key (from sender)"
-            !isSender && currentStep == 2 && senderKyberPk != null -> "Press Generate to create 2.key"
-            !isSender && currentStep == 3 && senderFinalBundle == null -> "Read 3.key (from sender)"
-            !isSender && currentStep == 3 && senderFinalBundle != null && finalSharedSecret == null -> "Press Generate to create final.key"
-            else -> "Complete"
+            isSender && currentStep == 1 -> "Step 1: Press 'Generate Key File' button to create 1.key"
+            isSender && currentStep == 2 && receiverResponseBundle == null -> "Step 2: Press 'Open Key File' button and select 2.key received from receiver"
+            isSender && currentStep == 2 && receiverResponseBundle != null && senderFinalBundle == null -> "Step 2: Great! Now press 'Generate Key File' button to create 3.key"
+            isSender && currentStep == 3 && senderFinalBundle != null && finalSharedSecret == null -> "Step 3: Send 3.key to receiver, then press 'Generate Key File' button to create final.key"
+            isSender && currentStep == 4 -> "✅ Complete! final.key has been generated and saved"
+            !isSender && currentStep == 1 && senderKyberPk == null -> "Step 1: Press 'Open Key File' button and select 1.key received from sender"
+            !isSender && currentStep == 2 && senderKyberPk != null -> "Step 2: Press 'Generate Key File' button to create 2.key"
+            !isSender && currentStep == 3 && senderFinalBundle == null -> "Step 3: Press 'Open Key File' button and select 3.key received from sender"
+            !isSender && currentStep == 3 && senderFinalBundle != null && finalSharedSecret == null -> "Step 3: Great! Now press 'Generate Key File' button to create final.key"
+            !isSender && currentStep == 4 -> "✅ Complete! final.key has been generated and saved"
+            else -> "Process complete"
         }
         
-        binding.tvStatus.text = "$role - Step $currentStep: $stepDescription" // Render guidance
+        binding.tvStatus.text = "$role: $stepDescription" // Render guidance
     }
 
     private fun openFilePicker() { // Launch a get-content picker for any file
@@ -176,7 +178,7 @@ class KeyExchangeProcessActivity : AppCompatActivity() { // Guided UI for 3-mess
                         receiverResponseBundle = keyData // Store receiver's response bundle
                         withContext(Dispatchers.Main) {
                             updateStatus() // Refresh instructions
-                            Toast.makeText(this@KeyExchangeProcessActivity, "2.key read. Press Generate to create 3.key", Toast.LENGTH_LONG).show() // Guide next action
+                            Toast.makeText(this@KeyExchangeProcessActivity, "2.key loaded successfully! Now press 'Generate Key File' to create 3.key", Toast.LENGTH_LONG).show() // Guide next action
                         }
                     }
                     !isSender && currentStep == 1 -> { // Receiver consumes 1.key (sender's public key)
@@ -185,14 +187,14 @@ class KeyExchangeProcessActivity : AppCompatActivity() { // Guided UI for 3-mess
                         
                         withContext(Dispatchers.Main) {
                             updateStatus() // Refresh UI status
-                            Toast.makeText(this@KeyExchangeProcessActivity, "1.key read successfully", Toast.LENGTH_SHORT).show() // Confirmation
+                            Toast.makeText(this@KeyExchangeProcessActivity, "1.key loaded successfully! Now press 'Generate Key File' to create 2.key", Toast.LENGTH_LONG).show() // Confirmation
                         }
                     }
                     !isSender && currentStep == 3 -> { // Receiver consumes 3.key (sender's final bundle)
                         senderFinalBundle = keyData // Save sender's final bundle
                         withContext(Dispatchers.Main) {
                             updateStatus() // Refresh instructions
-                            Toast.makeText(this@KeyExchangeProcessActivity, "3.key read. Press Generate to create final.key", Toast.LENGTH_LONG).show() // Guide next action
+                            Toast.makeText(this@KeyExchangeProcessActivity, "3.key loaded successfully! Now press 'Generate Key File' to create final.key", Toast.LENGTH_LONG).show() // Guide next action
                         }
                     }
                 }
@@ -218,12 +220,12 @@ class KeyExchangeProcessActivity : AppCompatActivity() { // Guided UI for 3-mess
                         senderKyberPk = hybrid1Key // Store hybrid1Key as "public key"
                         senderKyberSk = senderState // Store sender state as "secret key"
                         
-                        queueSaveAndPersist("1.key", hybrid1Key, "1.key generated (ML-KEM+X448 and HQC+P521)") // Queue save of 1.key
+                        queueSaveAndPersist("1.key", hybrid1Key, "1.key generated successfully!") // Queue save of 1.key
                         currentStep = 2 // Move to step 2
                         
                         withContext(Dispatchers.Main) {
                             updateStatus() // Refresh UI
-                            Toast.makeText(this@KeyExchangeProcessActivity, "1.key generated", Toast.LENGTH_SHORT).show() // Notify
+                            Toast.makeText(this@KeyExchangeProcessActivity, "1.key generated! Send it to the receiver and wait for their 2.key", Toast.LENGTH_LONG).show() // Notify
                         }
                     }
                     isSender && currentStep == 2 -> { // Sender: produce 3.key after reading 2.key
@@ -242,10 +244,10 @@ class KeyExchangeProcessActivity : AppCompatActivity() { // Guided UI for 3-mess
                         finalSharedSecret = finalKey // Store final shared secret (128 bytes)
                         
                         withContext(Dispatchers.Main) {
-                            queueSaveAndPersist("3.key", hybrid3Key, "3.key generated (ML-KEM+X448 and HQC+P521). Send to receiver.") // Queue save
+                            queueSaveAndPersist("3.key", hybrid3Key, "3.key generated successfully!") // Queue save
                             currentStep = 3 // Next step
                             updateStatus() // Update UI
-                            Toast.makeText(this@KeyExchangeProcessActivity, "3.key generated. Send to receiver, then press Generate to create final.key", Toast.LENGTH_LONG).show() // Instruction
+                            Toast.makeText(this@KeyExchangeProcessActivity, "3.key generated! Send it to the receiver, then press 'Generate Key File' to create your final.key", Toast.LENGTH_LONG).show() // Instruction
                         }
                     }
                     isSender && currentStep == 3 -> { // Sender finalization: save final.key locally
@@ -279,12 +281,12 @@ class KeyExchangeProcessActivity : AppCompatActivity() { // Guided UI for 3-mess
                         receiverResponseBundle = hybrid2Key // Store hybrid2Key as response bundle
                         receiverKyberSk = receiverState // Store receiver state as "secret key"
                         
-                        queueSaveAndPersist("2.key", hybrid2Key, "2.key generated (ML-KEM+X448 and HQC+P521)") // Queue save of 2.key
+                        queueSaveAndPersist("2.key", hybrid2Key, "2.key generated successfully!") // Queue save of 2.key
                         currentStep = 3 // Move to step 3
                         
                         withContext(Dispatchers.Main) {
                             updateStatus() // Refresh UI
-                            Toast.makeText(this@KeyExchangeProcessActivity, "2.key generated. Sender will complete exchange to produce 3.key.", Toast.LENGTH_LONG).show() // Instruction
+                            Toast.makeText(this@KeyExchangeProcessActivity, "2.key generated! Send it to the sender and wait for their 3.key", Toast.LENGTH_LONG).show() // Instruction
                         }
                     }
                     !isSender && currentStep == 2 -> { // Receiver: generate 2.key response
@@ -300,12 +302,12 @@ class KeyExchangeProcessActivity : AppCompatActivity() { // Guided UI for 3-mess
                         receiverKyberSk = result[1] as ByteArray // Serialized receiver state
                         receiverP521Sk = ByteArray(66) { 0x33 }
                         
-                        queueSaveAndPersist("2.key", bundledData, "2.key generated") // Save 2.key
+                        queueSaveAndPersist("2.key", bundledData, "2.key generated successfully!") // Save 2.key
                         currentStep = 3 // Move to step 3
                         
                         withContext(Dispatchers.Main) {
                             updateStatus() // Refresh UI
-                            Toast.makeText(this@KeyExchangeProcessActivity, "2.key generated. Sender will complete exchange to produce 3.key.", Toast.LENGTH_LONG).show() // Instruction
+                            Toast.makeText(this@KeyExchangeProcessActivity, "2.key generated! Send it to the sender and wait for their 3.key", Toast.LENGTH_LONG).show() // Instruction
                         }
                     }
                     !isSender && currentStep == 3 -> { // Receiver: finalize using 3.key
@@ -321,11 +323,11 @@ class KeyExchangeProcessActivity : AppCompatActivity() { // Guided UI for 3-mess
                         finalSharedSecret = finalKey // Store final shared secret (128 bytes)
                         
                         withContext(Dispatchers.Main) {
-                            queueSaveAndPersist("final.key", finalKey, "final.key generated (ML-KEM+X448 and HQC+P521)") // Save final.key
+                            queueSaveAndPersist("final.key", finalKey, "final.key generated successfully!") // Save final.key
+                            currentStep = 4 // Done
                             updateStatus() // UI refresh
-                            Toast.makeText(this@KeyExchangeProcessActivity, "final.key generated", Toast.LENGTH_SHORT).show() // Confirm
+                            Toast.makeText(this@KeyExchangeProcessActivity, "Success! final.key has been generated and saved. You can now use it for secure communication.", Toast.LENGTH_LONG).show() // Confirm
                         }
-                        currentStep = 4 // Done
                     }
                     else -> { // Any other state
                         withContext(Dispatchers.Main) {
