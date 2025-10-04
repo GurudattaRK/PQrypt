@@ -33,10 +33,10 @@ class PasswordVaultActivity : AppCompatActivity() { // UI to derive, display, an
 
     private lateinit var binding: ActivityPasswordVaultBinding // ViewBinding for this screen
     private lateinit var sharedPrefs: SharedPreferences // App-specific preferences store
-    private var passwordLength: Int = 16 // Desired generated password length
+    private var passwordLength: Int = 20 // Desired generated password length (default 20)
     // Only store the 3 special character sets (last 3 of the 6 total sets)
     // First 3 sets (lowercase, uppercase, digits) are always enabled
-    private var enabledSpecialSets = booleanArrayOf(true, true, true) // Toggles for special sets
+    private var enabledSpecialSets = booleanArrayOf(true, false, false) // Toggles for special sets (default: only set1)
     
     // Simplified - no pre-hashing, everything done on Generate button
     private var finalPasswordHash: ByteArray? = null // Final hash for password generation
@@ -113,11 +113,11 @@ class PasswordVaultActivity : AppCompatActivity() { // UI to derive, display, an
     }
 
     private fun loadSettings() { // Restore UI-configurable options from preferences
-        passwordLength = sharedPrefs.getInt("password_length", 16) // Length slider persisted value
+        passwordLength = sharedPrefs.getInt("password_length", 20) // Length slider persisted value (default 20)
         // Load only the special character sets (sets 4, 5, 6)
-        enabledSpecialSets[0] = sharedPrefs.getBoolean("set_special1", true) // ~!@#$%^&*()
-        enabledSpecialSets[1] = sharedPrefs.getBoolean("set_special2", true) // /.,';][=-
-        enabledSpecialSets[2] = sharedPrefs.getBoolean("set_special3", true) // ><":}{+_
+        enabledSpecialSets[0] = sharedPrefs.getBoolean("set_special1", true) // ~!@#$%^&*() (default: enabled)
+        enabledSpecialSets[1] = sharedPrefs.getBoolean("set_special2", false) // /.,';][=- (default: disabled)
+        enabledSpecialSets[2] = sharedPrefs.getBoolean("set_special3", false) // ><":}{+_ (default: disabled)
     }
 
     private fun setupUI() { // Wire UI listeners and dynamic behaviors
@@ -275,18 +275,16 @@ class PasswordVaultActivity : AppCompatActivity() { // UI to derive, display, an
                 // Store for later use
                 finalPasswordHash = finalHash
                 
-                // Generate password using unified API (bitmask for specials)
+                // Generate password using the already-derived hash (bitmask for specials)
                 var specialsMask = 0
                 enabledSpecialSets.forEachIndexed { index, enabled ->
                     if (enabled) {
                         specialsMask = specialsMask or (1 shl index)
                     }
                 }
-                val appPasswordBytes = if (appPassword.isNotEmpty()) appPassword.toByteArray() else null
-                val generatedPassword = RustyCrypto.generatePasswordUnified(
-                    appName.toByteArray(),
-                    appPasswordBytes,
-                    masterPassword.toByteArray(),
+                // Use the already-derived finalHash instead of re-deriving
+                val generatedPassword = RustyCrypto.generatePasswordFromHash(
+                    finalHash,
                     passwordLength,
                     specialsMask
                 ) as String?

@@ -34,14 +34,10 @@ int derive_password_hash_unified_128_c(
     size_t out_len
 );
 
-// Unified password generator (one-shot) with bitmask flags (lowercase/uppercase/digits always included)
-int generate_password_unified_c(
-    const unsigned char* app_name,
-    size_t app_name_len,
-    const unsigned char* app_password,
-    size_t app_password_len,
-    const unsigned char* master_password,
-    size_t master_password_len,
+// Generate password from already-derived 128-byte hash
+int generate_password_from_hash_c(
+    const unsigned char* hash_128,
+    size_t hash_len,
     size_t desired_len,
     unsigned int enabled_sets_mask,
     char* output,

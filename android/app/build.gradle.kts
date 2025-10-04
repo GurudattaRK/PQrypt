@@ -15,6 +15,17 @@ android {
         versionName = "1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        
+        // Enable 16KiB page size support
+        externalNativeBuild {
+            cmake {
+                arguments += listOf(
+                    "-DANDROID_SUPPORT_FLEXIBLE_PAGE_SIZES=ON"
+                )
+                cFlags += "-Wl,-z,max-page-size=16384"
+                cppFlags += "-Wl,-z,max-page-size=16384"
+            }
+        }
     }
     
     lint {
@@ -36,7 +47,7 @@ android {
             externalNativeBuild {
                 cmake {
                     arguments("-DCMAKE_BUILD_TYPE=Release")
-                    cppFlags("-O3 -flto=full -DNDEBUG")
+                    cppFlags("-O3 -flto=full -DNDEBUG -Wl,-z,max-page-size=16384")
                 }
             }
         }
@@ -61,11 +72,25 @@ android {
             externalNativeBuild {
                 cmake {
                     arguments("-DCMAKE_BUILD_TYPE=RelWithDebInfo")
-                    cppFlags("-O3 -flto=full")
+                    cppFlags("-O3 -flto=full -Wl,-z,max-page-size=16384")
                 }
             }
         }
     }
+    
+    // Rename APK output files
+    applicationVariants.all {
+        outputs.all {
+            val output = this as com.android.build.gradle.internal.api.BaseVariantOutputImpl
+            val variantName = name
+            output.outputFileName = if (variantName.contains("release")) {
+                "PQrypt.apk"
+            } else {
+                "PQrypt-debug.apk"
+            }
+        }
+    }
+    
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_11
         targetCompatibility = JavaVersion.VERSION_11

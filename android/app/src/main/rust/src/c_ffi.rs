@@ -8,67 +8,28 @@ use crate::rusty_api::constants_errors::*;
 use crate::rusty_api::symmetric::argon2id_hash;
 use crate::rusty_api::hybrid::{pqc_4hybrid_init, pqc_4hybrid_recv, pqc_4hybrid_snd_final, pqc_4hybrid_recv_final, HybridSenderState, HybridReceiverState};
 
-// MARK: generate_password_unified_c
+// MARK: generate_password_from_hash_c
 #[no_mangle]
-pub extern "C" fn generate_password_unified_c(
-    app_name: *const c_uchar,
-    app_name_len: usize,
-    app_password: *const c_uchar,
-    app_password_len: usize,
-    master_password: *const c_uchar,
-    master_password_len: usize,
+pub extern "C" fn generate_password_from_hash_c(
+    hash_128: *const c_uchar,
+    hash_len: usize,
     desired_len: usize,
     enabled_sets_mask: u32,
     output: *mut c_char,
     output_len: *mut size_t,
 ) -> c_int {
-    if app_name.is_null() || master_password.is_null() || output.is_null() || output_len.is_null() {
+    if hash_128.is_null() || output.is_null() || output_len.is_null() || hash_len != 128 {
         return CRYPTO_ERROR_NULL_POINTER;
     }
 
-    let app_name_slice = unsafe { slice::from_raw_parts(app_name, app_name_len) };
-    let app_password_slice = if !app_password.is_null() && app_password_len > 0 {
-        unsafe { slice::from_raw_parts(app_password, app_password_len) }
-    } else { &[][..] };
-    let master_password_slice = unsafe { slice::from_raw_parts(master_password, master_password_len) };
-
-    // Salts (distinct labels)
-    let mut app_salt = [0u8; 32]; app_salt[0]=b'a'; app_salt[1]=b'p'; app_salt[2]=b'p';
-    let mut mst_salt = [0u8; 32]; mst_salt[0]=b'm'; mst_salt[1]=b's'; mst_salt[2]=b't';
-    let mut pwd_salt = [0u8; 32]; pwd_salt[0]=b'p'; pwd_salt[1]=b'w'; pwd_salt[2]=b'd';
-
-    // Argon2 parameters for PASSWORD GENERATOR (mem=16 MiB, time=3, lanes=1)
-    let mem_kib: u32 = 16 * 1024;
-    let time_cost: u32 = 3;
-    let lanes: u32 = 1;
-    let app_name_hash = match argon2id_hash(app_name_slice, &app_salt, 128, mem_kib, time_cost, lanes) {
-        Ok(h) => h, Err(_) => return CRYPTO_ERROR_HASHING_FAILED,
-    };
-    let master_hash = match argon2id_hash(master_password_slice, &mst_salt, 128, mem_kib, time_cost, lanes) {
-        Ok(h) => h, Err(_) => return CRYPTO_ERROR_HASHING_FAILED,
-    };
-    let mut combined_salt = [0u8; 32];
-    combined_salt[..16].copy_from_slice(&master_hash[..16]);
-    let mut final_hash = match argon2id_hash(&app_name_hash, &combined_salt, 128, mem_kib, time_cost, lanes) {
-        Ok(h) => h, Err(_) => return CRYPTO_ERROR_HASHING_FAILED,
-    };
-    if !app_password_slice.is_empty() {
-        let pwd_hash = match argon2id_hash(app_password_slice, &pwd_salt, 128, mem_kib, time_cost, lanes) {
-            Ok(h) => h, Err(_) => return CRYPTO_ERROR_HASHING_FAILED,
-        };
-        let mut final_salt = [0u8; 32];
-        final_salt[..16].copy_from_slice(&pwd_hash[..16]);
-        final_hash = match argon2id_hash(&final_hash, &final_salt, 128, mem_kib, time_cost, lanes) {
-            Ok(h) => h, Err(_) => return CRYPTO_ERROR_HASHING_FAILED,
-        };
-    }
+    let hash_slice = unsafe { slice::from_raw_parts(hash_128, 128) };
 
     let enabled_bool = [
         (enabled_sets_mask & 0b001) != 0,
         (enabled_sets_mask & 0b010) != 0,
         (enabled_sets_mask & 0b100) != 0,
     ];
-    let password = match generate_password(1, &final_hash, desired_len, &enabled_bool) {
+    let password = match generate_password(1, hash_slice, desired_len, &enabled_bool) {
         Some(p) => p,
         None => return CRYPTO_ERROR_KEY_GENERATION_FAILED,
     };
@@ -163,26 +124,32 @@ pub extern "C" fn derive_password_hash_unified_128_c(
     let mut app_salt = [0u8; 32]; app_salt[0]=b'a'; app_salt[1]=b'p'; app_salt[2]=b'p';
     let mut mst_salt = [0u8; 32]; mst_salt[0]=b'm'; mst_salt[1]=b's'; mst_salt[2]=b't';
     let mut pwd_salt = [0u8; 32]; pwd_salt[0]=b'p'; pwd_salt[1]=b'w'; pwd_salt[2]=b'd';
-    let app_name_hash = match argon2id_hash(app_name_slice, &app_salt, 128, 10240, 2, 1) {
+    
+    // Argon2 parameters for PASSWORD GENERATOR (mem=16 MiB, time=3, lanes=1) - MATCH DESKTOP
+    let mem_kib: u32 = 16 * 1024;
+    let time_cost: u32 = 3;
+    let lanes: u32 = 1;
+    
+    let app_name_hash = match argon2id_hash(app_name_slice, &app_salt, 128, mem_kib, time_cost, lanes) {
         Ok(h) => h, Err(_) => return CRYPTO_ERROR_HASHING_FAILED,
     };
 
-    let master_hash = match argon2id_hash(master_password_slice, &mst_salt, 128, 10240, 2, 1) {
+    let master_hash = match argon2id_hash(master_password_slice, &mst_salt, 128, mem_kib, time_cost, lanes) {
         Ok(h) => h, Err(_) => return CRYPTO_ERROR_HASHING_FAILED,
     };
     let mut combined_salt = [0u8; 32];
     combined_salt[..16].copy_from_slice(&master_hash[..16]);
-    let mut final_hash = match argon2id_hash(&app_name_hash, &combined_salt, 128, 10240, 2, 1) {
+    let mut final_hash = match argon2id_hash(&app_name_hash, &combined_salt, 128, mem_kib, time_cost, lanes) {
         Ok(h) => h, Err(_) => return CRYPTO_ERROR_HASHING_FAILED,
     };
 
     if !app_password_slice.is_empty() {
-        let pwd_hash = match argon2id_hash(app_password_slice, &pwd_salt, 128, 10240, 2, 1) {
+        let pwd_hash = match argon2id_hash(app_password_slice, &pwd_salt, 128, mem_kib, time_cost, lanes) {
             Ok(h) => h, Err(_) => return CRYPTO_ERROR_HASHING_FAILED,
         };
         let mut final_salt = [0u8; 32];
         final_salt[..16].copy_from_slice(&pwd_hash[..16]);
-        final_hash = match argon2id_hash(&final_hash, &final_salt, 128, 10240, 2, 1) {
+        final_hash = match argon2id_hash(&final_hash, &final_salt, 128, mem_kib, time_cost, lanes) {
             Ok(h) => h, Err(_) => return CRYPTO_ERROR_HASHING_FAILED,
         };
     }

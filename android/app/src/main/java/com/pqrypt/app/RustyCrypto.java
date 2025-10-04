@@ -41,5 +41,5 @@ public class RustyCrypto { // Public JNI bridge class exposing native crypto met
     // Minimal new surface
     public static native int tripleEncryptFd(byte[] secret, boolean isKeyFile, int inFd, int outFd);
     public static native int tripleDecryptFd(byte[] secret, boolean isKeyFile, int inFd, int outFd);
-    public static native String generatePasswordUnified(byte[] appName, byte[] appPassword, byte[] masterPassword, int desiredLen, int enabledSetsMask);
+    public static native String generatePasswordFromHash(byte[] hash128, int desiredLen, int enabledSetsMask);
 }

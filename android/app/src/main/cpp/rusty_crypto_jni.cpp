@@ -70,37 +70,24 @@ Java_com_pqrypt_app_RustyCrypto_tripleDecryptFd(JNIEnv *env, jclass, jbyteArray 
 
 
 extern "C" JNIEXPORT jstring JNICALL
-Java_com_pqrypt_app_RustyCrypto_generatePasswordUnified(JNIEnv *env, jclass, jbyteArray appName, jbyteArray appPassword, jbyteArray masterPassword, jint desiredLen, jint enabledSetsMask) {
-    if (!appName || !masterPassword || desiredLen <= 0) return nullptr;
+Java_com_pqrypt_app_RustyCrypto_generatePasswordFromHash(JNIEnv *env, jclass, jbyteArray hash128, jint desiredLen, jint enabledSetsMask) {
+    if (!hash128 || desiredLen <= 0) return nullptr;
 
-    jsize appLen = env->GetArrayLength(appName);
-    jsize pwdLen = appPassword ? env->GetArrayLength(appPassword) : 0;
-    jsize mstLen = env->GetArrayLength(masterPassword);
+    jsize hashLen = env->GetArrayLength(hash128);
+    if (hashLen != 128) return nullptr;
 
-    jbyte* appBytes = env->GetByteArrayElements(appName, nullptr);
-    jbyte* pwdBytes = appPassword ? env->GetByteArrayElements(appPassword, nullptr) : nullptr;
-    jbyte* mstBytes = env->GetByteArrayElements(masterPassword, nullptr);
-    if (!appBytes || !mstBytes) {
-        if (appBytes) env->ReleaseByteArrayElements(appName, appBytes, JNI_ABORT);
-        if (pwdBytes) env->ReleaseByteArrayElements(appPassword, pwdBytes, JNI_ABORT);
-        if (mstBytes) env->ReleaseByteArrayElements(masterPassword, mstBytes, JNI_ABORT);
-        return nullptr;
-    }
+    jbyte* hashBytes = env->GetByteArrayElements(hash128, nullptr);
+    if (!hashBytes) return nullptr;
 
     char outBuf[257];
     size_t outLen = 0;
-    int res = generate_password_unified_c(
-        reinterpret_cast<const unsigned char*>(appBytes), (size_t)appLen,
-        reinterpret_cast<const unsigned char*>(pwdBytes), (size_t)pwdLen,
-        reinterpret_cast<const unsigned char*>(mstBytes), (size_t)mstLen,
+    int res = generate_password_from_hash_c(
+        reinterpret_cast<const unsigned char*>(hashBytes), 128,
         (size_t)desiredLen, (unsigned int)enabledSetsMask,
         outBuf, &outLen);
 
-    memset(appBytes, 0, appLen);
-    env->ReleaseByteArrayElements(appName, appBytes, 0);
-    if (pwdBytes) { memset(pwdBytes, 0, pwdLen); env->ReleaseByteArrayElements(appPassword, pwdBytes, 0); }
-    memset(mstBytes, 0, mstLen);
-    env->ReleaseByteArrayElements(masterPassword, mstBytes, 0);
+    memset(hashBytes, 0, hashLen);
+    env->ReleaseByteArrayElements(hash128, hashBytes, 0);
 
     if (res != CRYPTO_SUCCESS) return nullptr;
     return env->NewStringUTF(outBuf);

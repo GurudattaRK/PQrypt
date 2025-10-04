@@ -40,6 +40,7 @@ class SecureShareManualFileActivity : AppCompatActivity() {
     private var pendingOutputBytes: ByteArray? = null
     private var pendingSuggestedName: String? = null
     private var pendingSuccessToast: String? = null
+    private var pendingShowPathInResult: Boolean = false
 
     private val filePickerLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
@@ -348,11 +349,8 @@ class SecureShareManualFileActivity : AppCompatActivity() {
 
                 if (success == 0) {
                     val encryptedBytes = outputFile.readBytes()
-                    val outputPath = outputFile.absolutePath
                     withContext(Dispatchers.Main) {
-                        queueSaveAndPersist(encryptedFileName, encryptedBytes, "File encrypted successfully!")
-                        binding.tvStep1Result.text = "File encrypted: $outputPath"
-                        binding.tvStep1Result.visibility = View.VISIBLE
+                        queueSaveAndPersist(encryptedFileName, encryptedBytes, "File encrypted successfully!", showPathInResult = true)
                         currentStep = 4
                         updateUI()
                     }
@@ -402,7 +400,7 @@ class SecureShareManualFileActivity : AppCompatActivity() {
                 val inputFd = ParcelFileDescriptor.open(File(inputPath), ParcelFileDescriptor.MODE_READ_ONLY)
                 val outputFd = ParcelFileDescriptor.open(outputFile, ParcelFileDescriptor.MODE_CREATE or ParcelFileDescriptor.MODE_WRITE_ONLY)
 
-                val result = try {
+                val success = try {
                     RustyCrypto.tripleDecryptFd(finalSharedSecret!!, false, inputFd.fd, outputFd.fd)
                 } catch (e: Exception) {
                     -1
@@ -411,19 +409,16 @@ class SecureShareManualFileActivity : AppCompatActivity() {
                     outputFd.close()
                 }
 
-                if (result == 0) {
+                if (success == 0) {
                     val decryptedBytes = outputFile.readBytes()
-                    val outputPath = outputFile.absolutePath
                     withContext(Dispatchers.Main) {
-                        queueSaveAndPersist(outputName, decryptedBytes, "File decrypted successfully!")
-                        binding.tvStep1Result.text = "File decrypted: $outputPath"
-                        binding.tvStep1Result.visibility = View.VISIBLE
+                        queueSaveAndPersist(outputName, decryptedBytes, "File decrypted successfully!", showPathInResult = true)
                         currentStep = 4
                         updateUI()
                     }
                 } else {
                     withContext(Dispatchers.Main) {
-                        val errorMessage = when (result) {
+                        val errorMessage = when (success) {
                             RustyCrypto.CRYPTO_ERROR_DECRYPTION_FAILED -> "Authentication/decryption failed. This may be due to file corruption, tampering, or wrong file selection."
                             RustyCrypto.CRYPTO_ERROR_INVALID_INPUT -> "Invalid encrypted file. The file may be corrupted or not a valid encrypted file."
                             RustyCrypto.CRYPTO_ERROR_NULL_POINTER -> "File access error. Please check file permissions."
@@ -473,11 +468,12 @@ class SecureShareManualFileActivity : AppCompatActivity() {
     }
 
     // SAF functions copied from working PQC KeyExchangeProcessActivity
-    private fun queueSaveAndPersist(filename: String, keyData: ByteArray, successMsg: String) {
+    private fun queueSaveAndPersist(filename: String, keyData: ByteArray, successMsg: String, showPathInResult: Boolean = false) {
         lifecycleScope.launch(Dispatchers.Main) {
             pendingOutputBytes = keyData
             pendingSuggestedName = filename
             pendingSuccessToast = successMsg
+            pendingShowPathInResult = showPathInResult
             if (pickedFolderUri != null) {
                 saveToPickedFolder()
             } else {
@@ -517,6 +513,7 @@ class SecureShareManualFileActivity : AppCompatActivity() {
         val folderUri = pickedFolderUri
         val bytes = pendingOutputBytes
         val name = pendingSuggestedName
+        val showPath = pendingShowPathInResult
         if (folderUri == null || bytes == null || name.isNullOrEmpty()) return
 
         try {
@@ -525,6 +522,13 @@ class SecureShareManualFileActivity : AppCompatActivity() {
                 contentResolver.openOutputStream(outUri)?.use { it.write(bytes) }
                 binding.tvStatus.text = pendingSuccessToast ?: "Saved"
                 Toast.makeText(this, pendingSuccessToast ?: "Saved", Toast.LENGTH_SHORT).show()
+                
+                // Update result text with actual file path if requested
+                if (showPath) {
+                    val actualPath = getActualPathFromUri(outUri) ?: name
+                    binding.tvStep1Result.text = "File saved: $actualPath"
+                    binding.tvStep1Result.visibility = View.VISIBLE
+                }
             } else {
                 Toast.makeText(this, "Failed to create file in selected folder", Toast.LENGTH_LONG).show()
             }
@@ -532,6 +536,7 @@ class SecureShareManualFileActivity : AppCompatActivity() {
             Toast.makeText(this, "Save failed: ${e.message}", Toast.LENGTH_LONG).show()
         } finally {
             pendingOutputBytes = null
+            pendingShowPathInResult = false
             pendingSuggestedName = null
             pendingSuccessToast = null
         }
@@ -583,6 +588,33 @@ class SecureShareManualFileActivity : AppCompatActivity() {
                 cursor.getString(nameIndex)
             } else null
         } ?: uri.lastPathSegment ?: "unknown"
+    }
+    
+    private fun getActualPathFromUri(uri: Uri): String? {
+        return try {
+            contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+                val nameIndex = cursor.getColumnIndex("_display_name")
+                if (nameIndex >= 0 && cursor.moveToFirst()) {
+                    val fileName = cursor.getString(nameIndex)
+                    // Try to get a readable path
+                    val treeUri = pickedFolderUri
+                    if (treeUri != null) {
+                        val treePath = treeUri.path?.substringAfter(":")
+                        if (treePath != null) {
+                            "/storage/emulated/0/$treePath/$fileName"
+                        } else {
+                            fileName
+                        }
+                    } else {
+                        fileName
+                    }
+                } else {
+                    uri.lastPathSegment
+                }
+            }
+        } catch (e: Exception) {
+            uri.lastPathSegment
+        }
     }
 
     private fun cleanupIntermediateFiles() {

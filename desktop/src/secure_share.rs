@@ -394,7 +394,14 @@ pub fn decrypt_file_with_key_dir(file_path: &str, mode: &str, key_dir: &str) -> 
             secret[..copy_len].copy_from_slice(&key_data[..copy_len]);
             let secret = &secret;
             
-            let original_name = if file_path.ends_with(".encrypted") {
+            let original_name = if file_path.ends_with(".pqrypt2") {
+                std::path::Path::new(file_path)
+                    .file_name()
+                    .unwrap_or(std::ffi::OsStr::new("file"))
+                    .to_string_lossy()
+                    .trim_end_matches(".pqrypt2")
+                    .to_string()
+            } else if file_path.ends_with(".encrypted") {
                 std::path::Path::new(file_path)
                     .file_name()
                     .unwrap_or(std::ffi::OsStr::new("file"))

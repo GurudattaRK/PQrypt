@@ -93,14 +93,25 @@ impl PasswordGenerator {
 
         let domain_salt = b"PQrypt_Password_Generation_2024";
         let mut password_chars = Vec::with_capacity(length);
-        for (i, (set_name, charset)) in active_sets.iter().enumerate() {
+        
+        // Sort keys for deterministic iteration order
+        let mut sorted_keys: Vec<_> = active_sets.keys().collect();
+        sorted_keys.sort();
+        
+        for (i, &set_name) in sorted_keys.iter().enumerate() {
+            let charset = active_sets.get(set_name).unwrap();
             let info = format!("required_{}_{}", set_name, i).into_bytes();
             let bytes = self.hkdf(domain_salt, input_hash, &info, 4);
             let value = u32::from_be_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]);
             let index = self.unbiased_select(value, charset.len());
             password_chars.push(charset.chars().nth(index).unwrap());
         }
-        let all_chars: String = active_sets.values().cloned().collect();
+        
+        // Build all_chars in sorted order for consistency
+        let mut all_chars = String::new();
+        for &key in &sorted_keys {
+            all_chars.push_str(active_sets.get(key).unwrap());
+        }
         for position in active_sets.len()..length {
             let info = format!("char_{}", position).into_bytes();
             let bytes = self.hkdf(domain_salt, input_hash, &info, 4);
