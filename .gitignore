@@ -14,4 +14,40 @@
 local.properties
 *target*
 *.lock
-backup*
+
+# Build outputs
+/android/app/build/
+/android/build/
+/desktop/target/
+
+# Generated files
+*.apk
+*.aab
+*.ap_
+*.dex
+*.class
+
+# Temporary files
+*.tmp
+*.temp
+*.swp
+*~
+
+# OS files
+Thumbs.db
+.DS_Store
+
+# IDE files
+.vscode/
+.idea/
+
+# Rust
+Cargo.lock
+debug/
+target/
+
+# Android
+*.log
+.gradle/
+build/
+local.properties
