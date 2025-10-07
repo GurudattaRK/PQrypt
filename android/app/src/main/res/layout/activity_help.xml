@@ -20,6 +20,7 @@
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:text="← Back"
+            android:textSize="14sp"
                 style="@style/Widget.Material3.Button"
                 android:backgroundTint="#BA68C8"
                 android:textColor="@android:color/white" />

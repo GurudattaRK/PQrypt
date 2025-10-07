@@ -30,7 +30,7 @@
                 android:backgroundTint="#9C27B0"
                 android:text="← Back"
                 android:textColor="@android:color/white"
-                android:textSize="14sp" />
+            android:textSize="14sp" />
 
             <View
                 android:layout_width="0dp"
@@ -45,7 +45,7 @@
                 android:backgroundTint="#FF9800"
                 android:text="Help?"
                 android:textColor="@android:color/white"
-                android:textSize="14sp" />
+            android:textSize="14sp" />
         </LinearLayout>
 
         <TextView
