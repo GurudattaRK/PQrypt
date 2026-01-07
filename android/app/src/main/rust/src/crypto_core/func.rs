@@ -119,6 +119,72 @@ unsafe extern "C" {
     ) -> c_int;
 }
 
+//#MARK: AES Decrypt with AAD
+/// Note: All inputs zeroized before return. Caller must zeroize returned plaintext.
+#[inline(always)]
+pub fn aes_decrypt_with_aad(
+    key: &mut [u8; AES_KEY_SIZE],
+    nonce: &mut [u8; AES_NONCE_SIZE],
+    ciphertext: &mut [u8],
+    tag: &mut [u8; AES_TAG_SIZE],
+    aad: &[u8]
+) -> Result<Vec<u8>, String> {
+    let cipher = Cipher::aes_256_gcm();
+    let mut decrypter = Crypter::new(cipher, Mode::Decrypt, key, Some(nonce))
+        .map_err(|e| {
+            secure_zero(key);
+            secure_zero(nonce);
+            secure_zero(ciphertext);
+            secure_zero(tag);
+            e.to_string()
+        })?;
+
+    // Supply AAD before processing ciphertext
+    decrypter.aad_update(aad).map_err(|e| {
+        secure_zero(key);
+        secure_zero(nonce);
+        secure_zero(ciphertext);
+        secure_zero(tag);
+        e.to_string()
+    })?;
+
+    // Set expected tag for verification (must be set before finalize)
+    decrypter.set_tag(tag).map_err(|e| {
+        secure_zero(key);
+        secure_zero(nonce);
+        secure_zero(ciphertext);
+        secure_zero(tag);
+        e.to_string()
+    })?;
+
+    let mut plaintext = vec![0u8; ciphertext.len() + cipher.block_size()];
+    let mut count = decrypter.update(ciphertext, &mut plaintext).map_err(|e| {
+        secure_zero(&mut plaintext);
+        secure_zero(key);
+        secure_zero(nonce);
+        secure_zero(ciphertext);
+        secure_zero(tag);
+        e.to_string()
+    })?;
+    count += decrypter.finalize(&mut plaintext[count..]).map_err(|e| {
+        secure_zero(&mut plaintext);
+        secure_zero(key);
+        secure_zero(nonce);
+        secure_zero(ciphertext);
+        secure_zero(tag);
+        e.to_string()
+    })?;
+    plaintext.truncate(count);
+
+    // Zeroize inputs on success
+    secure_zero(key);
+    secure_zero(nonce);
+    secure_zero(ciphertext);
+    secure_zero(tag);
+
+    Ok(plaintext)
+}
+
 // liboqs 0.15 types and functions for HQC-256
 #[repr(C)]
 pub struct OQS_KEM {
@@ -149,11 +215,17 @@ pub fn secure_zero(data: &mut [u8]) {
     data.zeroize();
 }
 
-//#MARK: AES Encrypt
+ 
+
+//#MARK: AES Encrypt with AAD
 /// Note: All inputs are zeroized before return. Caller must zeroize returned (ciphertext, tag).
 #[inline(always)]
-pub fn aes_encrypt(key: &mut [u8; AES_KEY_SIZE], nonce: &mut [u8; AES_NONCE_SIZE], plaintext: &mut [u8]) 
-    -> Result<(Vec<u8>, [u8; AES_TAG_SIZE]), String> {
+pub fn aes_encrypt_with_aad(
+    key: &mut [u8; AES_KEY_SIZE],
+    nonce: &mut [u8; AES_NONCE_SIZE],
+    plaintext: &mut [u8],
+    aad: &[u8]
+) -> Result<(Vec<u8>, [u8; AES_TAG_SIZE]), String> {
     let cipher = Cipher::aes_256_gcm();
     let mut encrypter = Crypter::new(cipher, Mode::Encrypt, key, Some(nonce))
         .map_err(|e| {
@@ -162,7 +234,15 @@ pub fn aes_encrypt(key: &mut [u8; AES_KEY_SIZE], nonce: &mut [u8; AES_NONCE_SIZE
             secure_zero(plaintext);
             e.to_string()
         })?;
-    
+
+    // AAD must be provided before processing plaintext
+    encrypter.aad_update(aad).map_err(|e| {
+        secure_zero(key);
+        secure_zero(nonce);
+        secure_zero(plaintext);
+        e.to_string()
+    })?;
+
     let mut ciphertext = vec![0u8; plaintext.len() + cipher.block_size()];
     let mut count = encrypter.update(plaintext, &mut ciphertext).map_err(|e| {
         secure_zero(&mut ciphertext);
@@ -179,7 +259,7 @@ pub fn aes_encrypt(key: &mut [u8; AES_KEY_SIZE], nonce: &mut [u8; AES_NONCE_SIZE
         e.to_string()
     })?;
     ciphertext.truncate(count);
-    
+
     let mut tag = [0u8; AES_TAG_SIZE];
     encrypter.get_tag(&mut tag).map_err(|e| {
         secure_zero(&mut ciphertext);
@@ -189,65 +269,16 @@ pub fn aes_encrypt(key: &mut [u8; AES_KEY_SIZE], nonce: &mut [u8; AES_NONCE_SIZE
         secure_zero(plaintext);
         e.to_string()
     })?;
-    
+
     // Zeroize inputs on success
     secure_zero(key);
     secure_zero(nonce);
     secure_zero(plaintext);
-    
+
     Ok((ciphertext, tag))
 }
 
-//#MARK: AES Decrypt
-/// Note: All inputs zeroized before return. Caller must zeroize returned plaintext.
-#[inline(always)]
-pub fn aes_decrypt(key: &mut [u8; AES_KEY_SIZE], nonce: &mut [u8; AES_NONCE_SIZE], 
-               ciphertext: &mut [u8], tag: &mut [u8; AES_TAG_SIZE]) 
-    -> Result<Vec<u8>, String> {
-    let cipher = Cipher::aes_256_gcm();
-    let mut decrypter = Crypter::new(cipher, Mode::Decrypt, key, Some(nonce))
-        .map_err(|e| {
-            secure_zero(key);
-            secure_zero(nonce);
-            secure_zero(ciphertext);
-            secure_zero(tag);
-            e.to_string()
-        })?;
-    decrypter.set_tag(tag).map_err(|e| {
-        secure_zero(key);
-        secure_zero(nonce);
-        secure_zero(ciphertext);
-        secure_zero(tag);
-        e.to_string()
-    })?;
-    
-    let mut plaintext = vec![0u8; ciphertext.len() + cipher.block_size()];
-    let mut count = decrypter.update(ciphertext, &mut plaintext).map_err(|e| {
-        secure_zero(&mut plaintext);
-        secure_zero(key);
-        secure_zero(nonce);
-        secure_zero(ciphertext);
-        secure_zero(tag);
-        e.to_string()
-    })?;
-    count += decrypter.finalize(&mut plaintext[count..]).map_err(|e| {
-        secure_zero(&mut plaintext);
-        secure_zero(key);
-        secure_zero(nonce);
-        secure_zero(ciphertext);
-        secure_zero(tag);
-        e.to_string()
-    })?;
-    plaintext.truncate(count);
-    
-    // Zeroize inputs on success
-    secure_zero(key);
-    secure_zero(nonce);
-    secure_zero(ciphertext);
-    secure_zero(tag);
-    
-    Ok(plaintext)
-}
+ 
 
 //#MARK: ChaCha20 Encrypt
 /// Note: All inputs zeroized before return. Caller must zeroize returned ciphertext.

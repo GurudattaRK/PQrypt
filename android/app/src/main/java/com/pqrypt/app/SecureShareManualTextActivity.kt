@@ -291,11 +291,11 @@ class SecureShareManualTextActivity : AppCompatActivity() {
                     outputFd.close()
                 }
 
-                if (success == 0) {
+                if (success == RustyCrypto.CRYPTO_SUCCESS) {
                     val encryptedBytes = outputFile.readBytes()
                     
                     withContext(Dispatchers.Main) {
-                        saveKeyFile(encryptedBytes, "text.encrypted")
+                        saveKeyFile(encryptedBytes, "text.pqrypt")
                         binding.tvStep1Result.text = "Text encrypted and saved"
                         binding.tvStep1Result.visibility = View.VISIBLE
                         currentStep = 4
@@ -343,7 +343,7 @@ class SecureShareManualTextActivity : AppCompatActivity() {
                     outputFd.close()
                 }
 
-                if (success == 0) {
+                if (success == RustyCrypto.CRYPTO_SUCCESS) {
                     val decryptedBytes = outputFile.readBytes()
                     val decryptedText = String(decryptedBytes)
                     
@@ -397,6 +397,7 @@ class SecureShareManualTextActivity : AppCompatActivity() {
     }
 
     private fun resetStates() {
+        finalSharedSecret?.fill(0)
         finalSharedSecret = null
     }
 

@@ -73,30 +73,26 @@ pub fn double_encrypt_fd_raw(
         input_data.extend_from_slice(&buffer[..read_result as usize]);
     }
 
-    // Preserve nonces for header before they can be mutated/zeroized by double_encrypt
-    let chacha_nonce_hdr = chacha_nonce;
-    let aes_nonce_hdr = aes_nonce;
+    // Build fixed-size binary header (54 bytes):
+    // Magic (6) + original_size (8) + aes_nonce (12) + chacha_nonce (12) + salt (16 - unused here)
+    let mut header = [0u8; 54];
+    header[0..6].copy_from_slice(b"PQRYPT");
+    header[6..14].copy_from_slice(&(input_data.len() as u64).to_le_bytes());
+    header[14..26].copy_from_slice(&aes_nonce);
+    header[26..38].copy_from_slice(&chacha_nonce);
+    header[38..54].copy_from_slice(&[0u8; 16]);
 
-    // Double encrypt the data
+    // Double encrypt the data with header as AAD
     let (ciphertext, aes_tag) = double_encrypt(
         &mut chacha_key,
         &mut chacha_nonce,
         &mut aes_key,
         &mut aes_nonce,
         &mut input_data,
-    ).map_err(|e| {
+        &header,
+    ).map_err(|_| {
         CryptoError::DebugCode(step)
     })?;
-
-
-    // Build fixed-size binary header (54 bytes):
-    // Magic (6) + original_size (8) + aes_nonce (12) + chacha_nonce (12) + salt (16 - unused here)
-    let mut header = [0u8; 54];
-    header[0..6].copy_from_slice(b"PQRYPT");
-    header[6..14].copy_from_slice(&(input_data.len() as u64).to_le_bytes());
-    header[14..26].copy_from_slice(&aes_nonce_hdr);
-    header[26..38].copy_from_slice(&chacha_nonce_hdr);
-    header[38..54].copy_from_slice(&[0u8; 16]);
 
     // Build GCM trailer (19 bytes): "GCM" + 16-byte tag
     let mut gcm_trailer = [0u8; 19];
@@ -240,7 +236,8 @@ pub fn double_decrypt_fd_raw(
         &mut chacha_key,
         &mut chacha_nonce,
         &mut ciphertext_copy,
-    ).map_err(|e| {
+        &input_data[..54],
+    ).map_err(|_| {
         CryptoError::DebugCode(step)
     })?;
 

@@ -1,7 +1,7 @@
 // Import functions from func module
 use super::func::{
     chacha20_encrypt, chacha20_decrypt,
-    aes_encrypt, aes_decrypt,
+    aes_encrypt_with_aad, aes_decrypt_with_aad,
     x448mlkem1024_keygen, x448mlkem1024_encaps, x448mlkem1024_decaps,
     hqc_p521_keygen, hqc_p521_encaps, hqc_p521_decaps,
     slhdsa_keygen, slhdsa_sign, slhdsa_verify,
@@ -30,27 +30,14 @@ pub fn double_encrypt(
     chacha_nonce: &mut ChaChaNonce,
     aes_key: &mut AesKey,
     aes_nonce: &mut AesNonce,
-    plaintext: &mut [u8]
+    plaintext: &mut [u8],
+    aad: &[u8]
 ) -> Result<(Vec<u8>, AesTag), String> {
     // Step 1: ChaCha20 encryption
-    eprintln!("[CRYPTO_CORE][DOUBLE_ENCRYPT] Input plaintext len={}, first 16 bytes: {:02x?}", plaintext.len(), &plaintext[..16.min(plaintext.len())]);
-    println!("[CRYPTO_CORE][DOUBLE_ENCRYPT] Input plaintext len={}, first 16 bytes: {:02x?}", plaintext.len(), &plaintext[..16.min(plaintext.len())]);
     let mut chacha_ciphertext = chacha20_encrypt(chacha_key, chacha_nonce, plaintext)?;
-    eprintln!("[CRYPTO_CORE][DOUBLE_ENCRYPT] After ChaCha20 encrypt, chacha_ciphertext len={}, first 16 bytes: {:02x?}", chacha_ciphertext.len(), &chacha_ciphertext[..16.min(chacha_ciphertext.len())]);
-    println!("[CRYPTO_CORE][DOUBLE_ENCRYPT] After ChaCha20 encrypt, chacha_ciphertext len={}, first 16 bytes: {:02x?}", chacha_ciphertext.len(), &chacha_ciphertext[..16.min(chacha_ciphertext.len())]);
     
     // Step 2: AES-GCM encryption on ChaCha20 ciphertext
-    let result = aes_encrypt(aes_key, aes_nonce, &mut chacha_ciphertext);
-    match &result {
-        Ok((ciphertext, tag)) => {
-            eprintln!("[CRYPTO_CORE][DOUBLE_ENCRYPT] After AES-GCM encrypt, ciphertext len={}, first 16 bytes: {:02x?}, tag: {:02x?}", ciphertext.len(), &ciphertext[..16.min(ciphertext.len())], tag);
-            println!("[CRYPTO_CORE][DOUBLE_ENCRYPT] After AES-GCM encrypt, ciphertext len={}, first 16 bytes: {:02x?}, tag: {:02x?}", ciphertext.len(), &ciphertext[..16.min(ciphertext.len())], tag);
-        },
-        Err(e) => {
-            eprintln!("[CRYPTO_CORE][DOUBLE_ENCRYPT] AES-GCM encrypt failed: {}", e);
-            println!("[CRYPTO_CORE][DOUBLE_ENCRYPT] AES-GCM encrypt failed: {}", e);
-        },
-    };
+    let result = aes_encrypt_with_aad(aes_key, aes_nonce, &mut chacha_ciphertext, aad);
     
     // Zeroize intermediate data
     secure_zero(&mut chacha_ciphertext);
@@ -67,27 +54,14 @@ pub fn double_decrypt(
     aes_tag: &mut AesTag,
     chacha_key: &mut ChaChaKey,
     chacha_nonce: &mut ChaChaNonce,
-    double_ciphertext: &mut [u8]
+    double_ciphertext: &mut [u8],
+    aad: &[u8]
 ) -> Result<Vec<u8>, String> {
-    // Step 1: AES-GCM decryption (includes tag verification)
-    eprintln!("[CRYPTO_CORE][DOUBLE_DECRYPT] Input double_ciphertext len={}, first 16 bytes: {:02x?}", double_ciphertext.len(), &double_ciphertext[..16.min(double_ciphertext.len())]);
-    println!("[CRYPTO_CORE][DOUBLE_DECRYPT] Input double_ciphertext len={}, first 16 bytes: {:02x?}", double_ciphertext.len(), &double_ciphertext[..16.min(double_ciphertext.len())]);
-    let mut chacha_ciphertext = aes_decrypt(aes_key, aes_nonce, double_ciphertext, aes_tag)?;
-    eprintln!("[CRYPTO_CORE][DOUBLE_DECRYPT] After AES-GCM decrypt, chacha_ciphertext len={}, first 16 bytes: {:02x?}", chacha_ciphertext.len(), &chacha_ciphertext[..16.min(chacha_ciphertext.len())]);
-    println!("[CRYPTO_CORE][DOUBLE_DECRYPT] After AES-GCM decrypt, chacha_ciphertext len={}, first 16 bytes: {:02x?}", chacha_ciphertext.len(), &chacha_ciphertext[..16.min(chacha_ciphertext.len())]);
+    // Step 1: AES-GCM decryption (includes tag verification with AAD)
+    let mut chacha_ciphertext = aes_decrypt_with_aad(aes_key, aes_nonce, double_ciphertext, aes_tag, aad)?;
     
     // Step 2: ChaCha20 decryption
     let result = chacha20_decrypt(chacha_key, chacha_nonce, &mut chacha_ciphertext);
-    match &result {
-        Ok(plaintext) => {
-            eprintln!("[CRYPTO_CORE][DOUBLE_DECRYPT] After ChaCha20 decrypt, plaintext len={}, first 16 bytes: {:02x?}", plaintext.len(), &plaintext[..16.min(plaintext.len())]);
-            println!("[CRYPTO_CORE][DOUBLE_DECRYPT] After ChaCha20 decrypt, plaintext len={}, first 16 bytes: {:02x?}", plaintext.len(), &plaintext[..16.min(plaintext.len())]);
-        },
-        Err(e) => {
-            eprintln!("[CRYPTO_CORE][DOUBLE_DECRYPT] ChaCha20 decrypt failed: {}", e);
-            println!("[CRYPTO_CORE][DOUBLE_DECRYPT] ChaCha20 decrypt failed: {}", e);
-        },
-    };
     
     // Zeroize intermediate data
     secure_zero(&mut chacha_ciphertext);

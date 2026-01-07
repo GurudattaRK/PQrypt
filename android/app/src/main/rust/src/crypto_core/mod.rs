@@ -5,7 +5,7 @@ pub mod hybrids;
 pub use func::{
     argon2id_derive, secure_zero,
     chacha20_encrypt, chacha20_decrypt,
-    aes_encrypt, aes_decrypt,
+    aes_encrypt_with_aad, aes_decrypt_with_aad,
     x448mlkem1024_keygen, x448mlkem1024_encaps, x448mlkem1024_decaps,
     hqc_p521_keygen, hqc_p521_encaps, hqc_p521_decaps,
     slhdsa_keygen, slhdsa_sign, slhdsa_verify,

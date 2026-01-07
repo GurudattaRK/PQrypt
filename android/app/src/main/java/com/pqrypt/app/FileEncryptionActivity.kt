@@ -123,7 +123,7 @@ class FileEncryptionActivity : AppCompatActivity() { // UI for selecting files a
                     "encrypt" -> {
                         pendingAction = null // Clear pending marker
                         val inputFileName = getFileNameFromUri(selectedFileUri!!) ?: "file"
-                        val outputFileName = "${inputFileName}.pqrypt2"
+                        val outputFileName = "${inputFileName}.pqrypt"
                         binding.tvOutputPath.text = "Encrypting...." // Show actual output filename
                         Toast.makeText(this, "Encryption started", Toast.LENGTH_SHORT).show() // Notify user
                         performEncryption() // Continue with encryption
@@ -131,8 +131,8 @@ class FileEncryptionActivity : AppCompatActivity() { // UI for selecting files a
                     "decrypt" -> {
                         pendingAction = null // Clear pending marker
                         val inputFileName = getFileNameFromUri(selectedFileUri!!) ?: "file"
-                        val outputFileName = if (inputFileName.endsWith(".pqrypt2")) {
-                            inputFileName.removeSuffix(".pqrypt2")
+                        val outputFileName = if (inputFileName.endsWith(".pqrypt")) {
+                            inputFileName.removeSuffix(".pqrypt")
                         } else {
                             "${inputFileName}.decrypted"
                         }
@@ -270,7 +270,7 @@ class FileEncryptionActivity : AppCompatActivity() { // UI for selecting files a
                                 launchPickFolder() // Ask user to choose folder
                             } else {
                                 val inputFileName = getFileNameFromUri(selectedFileUri!!) ?: "file"
-                                val outputFileName = "${inputFileName}.pqrypt2"
+                                val outputFileName = "${inputFileName}.pqrypt"
                                 binding.tvOutputPath.text = "Started processing your file, please wait...." // Show processing status
                                 Toast.makeText(this@FileEncryptionActivity, "Encryption started", Toast.LENGTH_SHORT).show() // UX feedback
                                 performEncryption() // Begin encryption workflow
@@ -285,7 +285,7 @@ class FileEncryptionActivity : AppCompatActivity() { // UI for selecting files a
                         launchPickFolder()
                     } else {
                         val inputFileName = getFileNameFromUri(selectedFileUri!!) ?: "file"
-                        val outputFileName = "${inputFileName}.pqrypt2"
+                        val outputFileName = "${inputFileName}.pqrypt"
                         binding.tvOutputPath.text = "Started processing your file, please wait...."
                         Toast.makeText(this, "Encryption started", Toast.LENGTH_SHORT).show()
                         performEncryption()
@@ -313,8 +313,8 @@ class FileEncryptionActivity : AppCompatActivity() { // UI for selecting files a
                                 launchPickFolder() // Ask user to choose folder
                             } else {
                                 val inputFileName = getFileNameFromUri(selectedFileUri!!) ?: "file"
-                                val outputFileName = if (inputFileName.endsWith(".pqrypt2")) {
-                                    inputFileName.removeSuffix(".pqrypt2")
+                                val outputFileName = if (inputFileName.endsWith(".pqrypt")) {
+                                    inputFileName.removeSuffix(".pqrypt")
                                 } else {
                                     "${inputFileName}.decrypted"
                                 }
@@ -417,7 +417,7 @@ class FileEncryptionActivity : AppCompatActivity() { // UI for selecting files a
                 
                 // Get input file name for output suggestion
                 val inputFileName = getFileNameFromUri(selectedFileUri!!) ?: "encrypted_file"
-                val suggestedName = "${inputFileName}.pqrypt2"
+                val suggestedName = "${inputFileName}.pqrypt"
                 
                 withContext(Dispatchers.Main) {
                     // Store encryption parameters for save flow
@@ -454,8 +454,8 @@ class FileEncryptionActivity : AppCompatActivity() { // UI for selecting files a
                 
                 // Get input file name for output suggestion
                 val inputFileName = getFileNameFromUri(selectedFileUri!!) ?: "decrypted_file"
-                val suggestedName = if (inputFileName.endsWith(".pqrypt2")) {
-                    inputFileName.removeSuffix(".pqrypt2")
+                val suggestedName = if (inputFileName.endsWith(".pqrypt")) {
+                    inputFileName.removeSuffix(".pqrypt")
                 } else {
                     "${inputFileName}.decrypted"
                 }
@@ -531,7 +531,7 @@ class FileEncryptionActivity : AppCompatActivity() { // UI for selecting files a
                     
                     android.util.Log.d("FileEncryption", "doubleEncryptFd returned status code: $result")
                     
-                    if (result != 103) {  // 103 = STATUS_RUST_SUCCESS
+                    if (result != RustyCrypto.CRYPTO_SUCCESS) {
                         val errorMessage = when (result) {
                             -1 -> "Invalid input parameters"
                             -3 -> "KEY DERIVATION FAILED - Argon2 error in Rust crypto layer"
@@ -540,7 +540,7 @@ class FileEncryptionActivity : AppCompatActivity() { // UI for selecting files a
                             100 -> "Reached C function entry"
                             101 -> "Passed input validation"
                             102 -> "About to call Rust function"
-                            103 -> "Rust function completed successfully"
+                            RustyCrypto.CRYPTO_SUCCESS -> "Rust function completed successfully"
                             104 -> "Rust function returned error"
                             105 -> "Rust encryption started"
                             106 -> "Rust encryption key derived"

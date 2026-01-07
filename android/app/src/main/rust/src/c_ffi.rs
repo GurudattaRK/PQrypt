@@ -219,7 +219,7 @@ pub extern "C" fn double_encrypt_fd_c(
     
     // Call Rust function and return status codes
     match double_encrypt_fd_raw(secret_slice, is_keyfile != 0, in_fd, out_fd) {
-        Ok(_) => STATUS_RUST_SUCCESS,  // 103
+        Ok(_) => CRYPTO_SUCCESS,
         Err(e) => match e {
             crate::rusty_api::constants_errors::CryptoError::InvalidInput => -2,
             crate::rusty_api::constants_errors::CryptoError::HashingFailed | crate::rusty_api::constants_errors::CryptoError::KeyDerivationFailed => -3,
@@ -246,7 +246,7 @@ pub extern "C" fn double_decrypt_fd_c(
     let secret_slice = unsafe { slice::from_raw_parts(secret, secret_len as usize) };
     
     match double_decrypt_fd_raw(secret_slice, is_keyfile != 0, in_fd, out_fd) {
-        Ok(_) => STATUS_RUST_SUCCESS,  // 103
+        Ok(_) => CRYPTO_SUCCESS,
         Err(e) => match e {
             crate::rusty_api::constants_errors::CryptoError::InvalidInput => -2,
             crate::rusty_api::constants_errors::CryptoError::HashingFailed | crate::rusty_api::constants_errors::CryptoError::KeyDerivationFailed => -3,
