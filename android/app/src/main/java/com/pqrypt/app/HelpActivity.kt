@@ -87,7 +87,7 @@ class HelpActivity : AppCompatActivity() {
                 "• Same inputs always produce the same password\n" +
                 "• Cryptographically secure random generation\n\n" +
                 "⚙️ SETTINGS BUTTON:\n" +
-                "• Choose password length (8-128 characters)\n" +
+                "• Choose password length (8-64 characters)\n" +
                 "• Select special character sets to include\n" +
                 "• Lowercase, Uppercase and Numbers are always included\n\n" +
                 "📋 PASSWORD DISPLAY:\n" +
@@ -106,7 +106,7 @@ class HelpActivity : AppCompatActivity() {
                 "Password Settings Guide",
                 "Customize your password generation preferences:\n\n" +
                 "📏 LENGTH SLIDER:\n" +
-                "• Range: 8 to 128 characters\n" +
+                "• Range: 8 to 64 characters\n" +
                 "• Longer passwords = stronger security\n" +
                 "• Recommended: 16+ characters for most uses\n\n" +
                 "🔣 CHARACTER SETS:\n" +
@@ -161,22 +161,15 @@ class HelpActivity : AppCompatActivity() {
                 "1️⃣ Generate 1.key\n" +
                 "   • Creates initial key file to send to receiver\n" +
                 "   • Share this file with receiver via secure channel\n\n" +
-                "2️⃣ Process 2.key & Generate 3.key\n" +
+                "2️⃣ Process 2.key\n" +
                 "   • Open 2.key file received from receiver\n" +
-                "   • App automatically generates 3.key\n" +
-                "   • Send 3.key to receiver\n\n" +
-                "3️⃣ Final Key Generated\n" +
-                "   • App creates final.key for encryption/decryption\n" +
+                "   • App automatically generates final.key\n" +
                 "   • Key exchange complete!\n\n" +
                 "👤 RECEIVER PROCESS:\n" +
                 "1️⃣ Process 1.key & Generate 2.key\n" +
                 "   • Open 1.key file received from sender\n" +
-                "   • App automatically generates 2.key\n" +
+                "   • App automatically generates 2.key and final.key\n" +
                 "   • Send 2.key back to sender\n\n" +
-                "2️⃣ Process 3.key\n" +
-                "   • Open 3.key file received from sender\n" +
-                "   • App automatically generates final.key\n" +
-                "   • Key exchange complete!\n\n" +
                 "📁 FILE LOCATIONS:\n" +
                 "• All key files saved in Documents/PQrypt/\n" +
                 "• Use \"Open Output Folder\" to find files\n\n" +
@@ -199,7 +192,7 @@ class HelpActivity : AppCompatActivity() {
                 "• Select sender's device from the list\n" +
                 "• Connection will be established automatically\n\n" +
                 "🔄 AUTOMATIC PROCESS:\n" +
-                "• 1.key → 2.key → 3.key → final.key\n" +
+                "• 1.key → 2.key → final.key\n" +
                 "• All steps happen automatically over Bluetooth\n" +
                 "• Progress shown on both devices\n" +
                 "• No manual file sharing required\n\n" +

@@ -32,7 +32,7 @@ else()
 endif()
 
 # Paths for Rust build outputs
-set(RUST_STATIC_LIB ${RUST_LIB_DIR}/target/${RUST_TARGET}/release/librust.a)
+set(RUST_STATIC_LIB ${RUST_LIB_DIR}/target/${RUST_TARGET}/release/libPqrypt.a)
 
 # Ensure Ninja knows what file is produced by cargo using BYPRODUCTS/OUTPUT
 # Derive Android API level safely for toolchain triple
@@ -54,13 +54,53 @@ else()
 endif()
 set(CLANG_BIN ${ANDROID_TOOLCHAIN_ROOT}/bin/${CLANG_TRIPLE}${ANDROID_API_LEVEL}-clang)
 set(AR_BIN ${ANDROID_TOOLCHAIN_ROOT}/bin/llvm-ar)
+
+# Set paths to prebuilt OpenSSL and liboqs static libraries (allow override via env)
+set(OPENSSL_BASE $ENV{OPENSSL_ANDROID_DIR})
+if(NOT OPENSSL_BASE)
+    set(OPENSSL_BASE "$ENV{HOME}/crypto-static-libs/openssl-3.6-android")
+endif()
+set(OQS_BASE $ENV{LIBOQS_ANDROID_DIR})
+if(NOT OQS_BASE)
+    set(OQS_BASE "$ENV{HOME}/crypto-static-libs/liboqs-0.15-android")
+endif()
+
+# Compute lib/include directories (prefer ABI-specific layout if present)
+if(EXISTS "${OPENSSL_BASE}/${ANDROID_ABI}/lib")
+    set(OPENSSL_LIB_DIR "${OPENSSL_BASE}/${ANDROID_ABI}/lib")
+    set(OPENSSL_INCLUDE_DIR "${OPENSSL_BASE}/include")
+elseif(EXISTS "${OPENSSL_BASE}/lib")
+    set(OPENSSL_LIB_DIR "${OPENSSL_BASE}/lib")
+    set(OPENSSL_INCLUDE_DIR "${OPENSSL_BASE}/include")
+else()
+    message(FATAL_ERROR "OpenSSL not found. Set OPENSSL_ANDROID_DIR to prebuilt path or install to ${OPENSSL_BASE}")
+endif()
+
+if(EXISTS "${OQS_BASE}/${ANDROID_ABI}/lib")
+    set(OQS_LIB_DIR "${OQS_BASE}/${ANDROID_ABI}/lib")
+    set(OQS_INCLUDE_DIR "${OQS_BASE}/include")
+elseif(EXISTS "${OQS_BASE}/lib")
+    set(OQS_LIB_DIR "${OQS_BASE}/lib")
+    set(OQS_INCLUDE_DIR "${OQS_BASE}/include")
+else()
+    message(FATAL_ERROR "liboqs not found. Set LIBOQS_ANDROID_DIR to prebuilt path or install to ${OQS_BASE}")
+endif()
+
+include_directories(${OPENSSL_INCLUDE_DIR} ${OQS_INCLUDE_DIR})
+
 add_custom_command(
     OUTPUT ${RUST_STATIC_LIB}
     # Invoke cargo with Android NDK clang/llvm-ar for the specific Rust target
     COMMAND ${CMAKE_COMMAND} -E env 
         CC_${RUST_TARGET}=${CLANG_BIN} 
         AR=${AR_BIN} 
-        AR_${RUST_TARGET}=${AR_BIN} 
+        AR_${RUST_TARGET}=${AR_BIN}
+        OPENSSL_DIR=${OPENSSL_BASE}
+        OPENSSL_STATIC=1
+        OPENSSL_LIB_DIR=${OPENSSL_LIB_DIR}
+        OPENSSL_INCLUDE_DIR=${OPENSSL_INCLUDE_DIR}
+        OQS_DIR=${OQS_BASE}
+        PKG_CONFIG_PATH=${OQS_LIB_DIR}/pkgconfig
         cargo build --release --lib --target ${RUST_TARGET}
     WORKING_DIRECTORY ${RUST_LIB_DIR}
     COMMENT "Building Rust library for ${RUST_TARGET} (API ${ANDROID_API_LEVEL})"
@@ -75,14 +115,37 @@ add_custom_target(rust_build ALL
 # Build JNI bridge from existing working version
 add_library(rusty_crypto_jni SHARED
     cpp/rusty_crypto_jni.cpp
+    cpp/compat_shims.c
 )
 
-# Make sure Rust library is built before JNI bridge
-add_dependencies(rusty_crypto_jni rust_build)
+# Set maximum optimization flags for C++
+target_compile_options(rusty_crypto_jni PRIVATE
+    -O3                         # Maximum optimization level
+    -flto                       # Link-time optimization
+    -fomit-frame-pointer        # Omit frame pointer for performance
+    -DNDEBUG                    # Disable assertions
+)
 
-# Link the Rust library for the specific target
+# Use absolute static libraries (must exist for this ABI)
+set(OQS_LIB "${OQS_LIB_DIR}/liboqs.a")
+set(SSL_LIB "${OPENSSL_LIB_DIR}/libssl.a")
+set(CRYPTO_LIB "${OPENSSL_LIB_DIR}/libcrypto.a")
+if(NOT EXISTS ${OQS_LIB})
+    message(FATAL_ERROR "liboqs.a not found at ${OQS_LIB}")
+endif()
+if(NOT EXISTS ${SSL_LIB})
+    message(FATAL_ERROR "libssl.a not found at ${SSL_LIB}")
+endif()
+if(NOT EXISTS ${CRYPTO_LIB})
+    message(FATAL_ERROR "libcrypto.a not found at ${CRYPTO_LIB}")
+endif()
+
+# Link the Rust staticlib and required third-party static libs (absolute paths)
 target_link_libraries(rusty_crypto_jni
     ${RUST_STATIC_LIB}
+    ${OQS_LIB}
+    ${CRYPTO_LIB}
+    ${SSL_LIB}
     android
     log
 )

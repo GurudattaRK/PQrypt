@@ -286,7 +286,7 @@ class SecureShareBluetoothTextActivity : AppCompatActivity() {
                 // Create temporary text file
                 createTempTextFile()
                 
-                val result = RustyCrypto.pqc4HybridInit()
+                val result = RustyCrypto.hybridSenderInit()
                 if (result != null && result.isNotEmpty()) {
                     // Store sender state for later use
                     withContext(Dispatchers.Main) {
@@ -545,60 +545,24 @@ class SecureShareBluetoothTextActivity : AppCompatActivity() {
             binding.progressBar.progress = 10
         }
 
-        // Step 1: Send initial key
-        val initResult = RustyCrypto.pqc4HybridInit() as? Array<*>
-        if (initResult == null || initResult.size < 2) {
-            throw Exception("Failed to initialize key exchange")
-        }
-        
-        val initialKey = initResult[0] as? ByteArray
-        if (initialKey == null) {
-            throw Exception("Failed to generate initial key")
-        }
-        
-        senderState = initResult[1]
-        if (senderState == null) {
-            throw Exception("Failed to generate sender state")
-        }
-        
-        sendBluetoothData(initialKey)
+        // Step 1: Send initial key (package1)
+        val package1 = RustyCrypto.hybridSenderInit()
+        sendBluetoothData(package1)
         
         withContext(Dispatchers.Main) {
             binding.progressBar.progress = 30
         }
 
-        // Step 2: Receive response key
-        val responseKey = receiveBluetoothData()
-        if (responseKey.isEmpty()) {
-            throw Exception("Failed to receive response key from receiver")
-        }
-        
-        val senderStateBytes = senderState as? ByteArray
-        if (senderStateBytes == null) {
-            throw Exception("Sender state is invalid")
-        }
-        
-        val finalResult = RustyCrypto.pqc4HybridSndFinal(responseKey, senderStateBytes) as? Array<*>
-        if (finalResult == null || finalResult.size < 2) {
-            throw Exception("Failed to complete key exchange")
-        }
-        
-        // Step 3: Send final key
-        finalSharedSecret = finalResult[0] as? ByteArray
-        val finalKey = finalResult[1] as? ByteArray
-        
-        if (finalSharedSecret == null || finalKey == null) {
-            throw Exception("Failed to generate final keys")
-        }
-        
-        sendBluetoothData(finalKey)
+        // Step 2: Receive response key (package2) and derive final key
+        val package2 = receiveBluetoothData()
+        finalSharedSecret = RustyCrypto.hybridSenderFinal(package2)
         
         withContext(Dispatchers.Main) {
             binding.progressBar.progress = 60
             binding.tvProgressTitle.text = "Encrypting and Sending Text..."
         }
 
-        // Step 4: Encrypt and send text
+        // Step 3: Encrypt and send text
         val encryptedTextData = encryptInputText()
         if (encryptedTextData.isEmpty()) {
             throw Exception("Failed to encrypt text")
@@ -623,49 +587,20 @@ class SecureShareBluetoothTextActivity : AppCompatActivity() {
             binding.progressBar.progress = 10
         }
 
-        // Step 1: Receive initial key
-        val initialKey = receiveBluetoothData()
-        if (initialKey.isEmpty()) {
-            throw Exception("Failed to receive initial key from sender")
-        }
+        // Step 1: Receive initial key (package1)
+        val package1 = receiveBluetoothData()
+        val recvResult = RustyCrypto.hybridReceiver(package1)
         
-        val recvResult = RustyCrypto.pqc4HybridRecv(initialKey) as? Array<*>
-        if (recvResult == null || recvResult.size < 2) {
-            throw Exception("Invalid key exchange result from crypto library")
-        }
-        
-        // Step 2: Send response key
-        val responseKey = recvResult[0] as? ByteArray
-        if (responseKey == null) {
-            throw Exception("Failed to generate response key")
-        }
-        
-        receiverState = recvResult[1]
-        if (receiverState == null) {
-            throw Exception("Failed to generate receiver state")
-        }
-        
-        sendBluetoothData(responseKey)
+        // Step 2: Send response key (package2) and get final key
+        val package2 = recvResult[0] as ByteArray
+        finalSharedSecret = recvResult[1] as ByteArray
+        sendBluetoothData(package2)
         
         withContext(Dispatchers.Main) {
             binding.progressBar.progress = 40
         }
 
-        // Step 3: Receive final key and generate shared secret
-        val finalKey = receiveBluetoothData()
-        if (finalKey.isEmpty()) {
-            throw Exception("Failed to receive final key from sender")
-        }
-        
-        val receiverStateBytes = receiverState as? ByteArray
-        if (receiverStateBytes == null) {
-            throw Exception("Receiver state is invalid")
-        }
-        
-        finalSharedSecret = RustyCrypto.pqc4HybridRecvFinal(finalKey, receiverStateBytes) as? ByteArray
-        if (finalSharedSecret == null) {
-            throw Exception("Failed to generate shared secret")
-        }
+        // Receiver already has finalSharedSecret from hybridReceiver call above
         
         withContext(Dispatchers.Main) {
             binding.progressBar.progress = 60
@@ -791,7 +726,7 @@ class SecureShareBluetoothTextActivity : AppCompatActivity() {
             
             val success = try {
                 // Use real triple encryption with the shared secret
-                RustyCrypto.tripleEncryptFd(finalSharedSecret!!, false, inputFd.fd, outputFd.fd)
+                RustyCrypto.doubleEncryptFd(finalSharedSecret!!, false, inputFd.fd, outputFd.fd)
             } catch (e: Exception) {
                 -1 // failure
             } finally {
@@ -840,7 +775,7 @@ class SecureShareBluetoothTextActivity : AppCompatActivity() {
             
             val success = try {
                 // Use real triple decryption with the shared secret
-                RustyCrypto.tripleDecryptFd(finalSharedSecret!!, false, inputFd.fd, outputFd.fd)
+                RustyCrypto.doubleDecryptFd(finalSharedSecret!!, false, inputFd.fd, outputFd.fd)
             } catch (e: Exception) {
                 -1 // failure
             } finally {

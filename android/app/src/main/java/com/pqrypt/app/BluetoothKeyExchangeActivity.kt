@@ -559,7 +559,7 @@ class BluetoothKeyExchangeActivity : AppCompatActivity() {
             }
 
             // Step 1: Generate 1.key (hybrid1Key)
-            val result1 = RustyCrypto.pqc4HybridInit() as Array<*>
+            val result1 = RustyCrypto.hybridSenderInit() as Array<*>
             hybrid1Key = result1[0] as ByteArray
             senderState = result1[1] as ByteArray
 
@@ -577,13 +577,8 @@ class BluetoothKeyExchangeActivity : AppCompatActivity() {
                 binding.tvConnectionStatus.text = "Step 3: Generating final keys..."
             }
 
-            // Step 3: Generate 3.key and final secret
-            val result2 = RustyCrypto.pqc4HybridSndFinal(hybrid2Key!!, senderState!!) as Array<*>
-            finalSharedSecret = result2[0] as ByteArray
-            hybrid3Key = result2[1] as ByteArray
-
-            // Send 3.key to receiver
-            sendData(outputStream, hybrid3Key!!)
+            // Step 3: Generate final secret from package2
+            finalSharedSecret = RustyCrypto.hybridSenderFinal(hybrid2Key!!)
 
             // Save final.key
             saveFinalKey()
@@ -615,23 +610,17 @@ class BluetoothKeyExchangeActivity : AppCompatActivity() {
                 binding.tvConnectionStatus.text = "Step 2: Generating response..."
             }
 
-            // Step 2: Generate 2.key response
-            val result1 = RustyCrypto.pqc4HybridRecv(hybrid1Key!!) as Array<*>
+            // Step 2: Generate 2.key response and get final key
+            val result1 = RustyCrypto.hybridReceiver(hybrid1Key!!) as Array<*>
             hybrid2Key = result1[0] as ByteArray
-            receiverState = result1[1] as ByteArray
+            finalSharedSecret = result1[1] as ByteArray
 
             // Send 2.key to sender
             sendData(outputStream, hybrid2Key!!)
 
             withContext(Dispatchers.Main) {
-                binding.tvConnectionStatus.text = "Step 3: Waiting for final key..."
+                binding.tvConnectionStatus.text = "Step 3: Completing exchange..."
             }
-
-            // Step 3: Receive 3.key from sender
-            hybrid3Key = receiveData(inputStream)
-
-            // Generate final shared secret
-            finalSharedSecret = RustyCrypto.pqc4HybridRecvFinal(hybrid3Key!!, receiverState!!)
 
             // Save final.key
             saveFinalKey()

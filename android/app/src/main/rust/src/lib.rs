@@ -1,6 +1,7 @@
 //! This library provides both Rust-native APIs and C FFI bindings
 //! for cross-language compatibility.
 
+pub mod crypto_core;
 pub mod rusty_api;
 pub mod c_ffi;
 

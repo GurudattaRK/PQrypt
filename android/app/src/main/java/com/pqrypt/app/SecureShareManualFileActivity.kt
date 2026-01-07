@@ -32,8 +32,6 @@ class SecureShareManualFileActivity : AppCompatActivity() {
     private var selectedFilePath = ""
     private var finalSharedSecret: ByteArray? = null
     private var lastOutputPath: String? = null
-    private var senderState: ByteArray? = null
-    private var receiverState: ByteArray? = null
     
     // SAF saving state (copied from working PQC KeyExchangeProcessActivity)
     private var pickedFolderUri: Uri? = null
@@ -135,8 +133,7 @@ class SecureShareManualFileActivity : AppCompatActivity() {
                 isSender && currentStep == 1 -> generateStep1Key()
                 isSender && currentStep == 2 -> openKeyFile("2.key")
                 !isSender && currentStep == 1 -> openKeyFile("1.key")
-                !isSender && currentStep == 2 -> openKeyFile("3.key")
-                !isSender && currentStep == 3 -> openEncryptedFilePicker()
+                !isSender && currentStep == 2 -> openEncryptedFilePicker()
             }
         }
 
@@ -158,14 +155,13 @@ class SecureShareManualFileActivity : AppCompatActivity() {
             isSender && currentStep == 1 -> "Generate 1.key"
             isSender && currentStep == 2 -> "Open 2.key from Receiver"
             !isSender && currentStep == 1 -> "Open 1.key from Sender"
-            !isSender && currentStep == 2 -> "Open 3.key from Sender"
-            !isSender && currentStep == 3 -> "Open Encrypted File"
+            !isSender && currentStep == 2 -> "Open Encrypted File"
             else -> "Process Complete"
         }
         
         binding.btnStep1.isEnabled = when {
             isSender && currentStep == 1 && selectedFileUri == null -> false
-            currentStep > 3 -> false
+            currentStep > 2 -> false
             else -> true
         }
         
@@ -173,10 +169,9 @@ class SecureShareManualFileActivity : AppCompatActivity() {
         binding.tvStatus.text = when {
             isSender && currentStep == 1 -> "Step 1: Press 'Choose File' to select a file, then press 'Generate 1.key' button"
             isSender && currentStep == 2 -> "Step 2: Send 1.key to receiver and wait for their 2.key. Once received, press 'Open 2.key from Receiver' button"
-            isSender && currentStep > 2 -> "✅ Success! Your file has been encrypted. Send both 3.key and the encrypted file to the receiver"
-            !isSender && currentStep == 1 -> "Step 1: Wait for sender's 1.key file. Once received, press 'Open 1.key from Sender' button (2.key will auto-generate)"
-            !isSender && currentStep == 2 -> "Step 2: Send 2.key to sender and wait for their 3.key. Once received, press 'Open 3.key from Sender' button"
-            !isSender && currentStep == 3 -> "Step 3: Wait for encrypted file from sender. Once received, press 'Open Encrypted File' button to decrypt"
+            isSender && currentStep > 2 -> "✅ Success! Your file has been encrypted. Send final.key and the encrypted file to the receiver"
+            !isSender && currentStep == 1 -> "Step 1: Wait for sender's 1.key file. Once received, press 'Open 1.key from Sender' button (final key will auto-generate)"
+            !isSender && currentStep == 2 -> "Step 2: Send 2.key to sender. Wait for encrypted file, then press 'Open Encrypted File' button to decrypt"
             else -> "✅ Process complete! File successfully decrypted"
         }
     }
@@ -191,9 +186,13 @@ class SecureShareManualFileActivity : AppCompatActivity() {
             try {
                 resetStates()
                 
-                val result = RustyCrypto.pqc4HybridInit() as Array<*>
-                val publicKey = result[0] as ByteArray
-                senderState = result[1] as ByteArray
+                val publicKey: ByteArray? = RustyCrypto.hybridSenderInit()
+                if (publicKey == null || publicKey.isEmpty()) {
+                    withContext(Dispatchers.Main) {
+                        showError("Key generation failed. PQC not available.")
+                    }
+                    return@launch
+                }
                 
                 withContext(Dispatchers.Main) {
                     queueSaveAndPersist("1.key", publicKey, "1.key generated successfully")
@@ -225,14 +224,27 @@ class SecureShareManualFileActivity : AppCompatActivity() {
                     // Receiver opening 1.key -> auto-generate 2.key
                     !isSender && currentStep == 1 -> {
                         resetStates()
-                        val recvResult = RustyCrypto.pqc4HybridRecv(keyData)
-                        val response = recvResult[0] as ByteArray
-                        receiverState = recvResult[1] as ByteArray
+                        val recvResult = RustyCrypto.hybridReceiver(keyData)
+                        if (recvResult == null || recvResult.size != 2) {
+                            withContext(Dispatchers.Main) {
+                                showError("Failed to generate 2.key. PQC not available.")
+                            }
+                            return@launch
+                        }
+                        val response = recvResult[0] as? ByteArray
+                        val hash = recvResult[1] as? ByteArray
+                        if (response == null || hash == null || response.isEmpty() || hash.isEmpty()) {
+                            withContext(Dispatchers.Main) {
+                                showError("Invalid key data from native layer.")
+                            }
+                            return@launch
+                        }
+                        finalSharedSecret = hash
                         
                         withContext(Dispatchers.Main) {
                             if (response.isNotEmpty()) {
                                 queueSaveAndPersist("2.key", response, "2.key generated - Share with sender")
-                                binding.tvStep1Result.text = "2.key auto-generated - Share with sender"
+                                binding.tvStep1Result.text = "2.key auto-generated - final key ready for decryption"
                                 binding.tvStep1Result.visibility = View.VISIBLE
                                 currentStep = 2
                                 updateUI()
@@ -242,48 +254,25 @@ class SecureShareManualFileActivity : AppCompatActivity() {
                         }
                     }
                     
-                    // Sender opening 2.key -> auto-generate 3.key, final.key and encrypt file
+                    // Sender opening 2.key -> derive final key and encrypt file
                     isSender && currentStep == 2 -> {
-                        if (senderState == null) {
+                        val hash: ByteArray? = RustyCrypto.hybridSenderFinal(keyData)
+                        if (hash == null || hash.isEmpty()) {
                             withContext(Dispatchers.Main) {
-                                showError("Sender state not initialized. Please restart from Step 1.")
+                                showError("Failed to generate final key. Please verify 2.key")
                             }
                             return@launch
                         }
-                        
-                        val sndFinalResult = RustyCrypto.pqc4HybridSndFinal(keyData, senderState!!)
-                        finalSharedSecret = sndFinalResult[0] as ByteArray
-                        val result3Key = sndFinalResult[1] as ByteArray
+                        finalSharedSecret = hash
                         
                         withContext(Dispatchers.Main) {
-                            queueSaveAndPersist("3.key", result3Key, "3.key generated")
-                            queueSaveAndPersist("final.key", finalSharedSecret!!, "final.key generated")
-                            binding.tvStep1Result.text = "Keys generated - Auto-encrypting file..."
-                            binding.tvStep1Result.visibility = View.VISIBLE
-                            
-                            // Auto-encrypt file
-                            performFileEncryption()
-                        }
-                    }
-                    
-                    // Receiver opening 3.key -> auto-generate final.key
-                    !isSender && currentStep == 2 -> {
-                        if (receiverState == null) {
-                            withContext(Dispatchers.Main) {
-                                showError("Receiver state not initialized. Please restart from Step 1.")
-                            }
-                            return@launch
-                        }
-                        
-                        finalSharedSecret = RustyCrypto.pqc4HybridRecvFinal(keyData, receiverState!!)
-                        
-                        withContext(Dispatchers.Main) {
-                            if (finalSharedSecret != null && finalSharedSecret!!.isNotEmpty()) {
-                                queueSaveAndPersist("final.key", finalSharedSecret!!, "final.key generated - Ready to decrypt")
-                                binding.tvStep1Result.text = "final.key auto-generated - Ready to decrypt"
+                            if (hash != null && hash.isNotEmpty()) {
+                                queueSaveAndPersist("final.key", hash, "final.key generated")
+                                binding.tvStep1Result.text = "Keys generated - Auto-encrypting file..."
                                 binding.tvStep1Result.visibility = View.VISIBLE
-                                currentStep = 3
-                                updateUI()
+                                
+                                // Auto-encrypt file
+                                performFileEncryption()
                             } else {
                                 showError("Failed to generate final key")
                             }
@@ -291,7 +280,7 @@ class SecureShareManualFileActivity : AppCompatActivity() {
                     }
                     
                     // Receiver opening encrypted file -> auto-decrypt
-                    !isSender && currentStep == 3 -> {
+                    !isSender && currentStep == 2 -> {
                         if (finalSharedSecret == null) {
                             withContext(Dispatchers.Main) {
                                 showError("No decryption key available. Please complete previous steps.")
@@ -339,7 +328,7 @@ class SecureShareManualFileActivity : AppCompatActivity() {
                 val outputFd = ParcelFileDescriptor.open(outputFile, ParcelFileDescriptor.MODE_CREATE or ParcelFileDescriptor.MODE_WRITE_ONLY)
                 
                 val success = try {
-                    RustyCrypto.tripleEncryptFd(finalSharedSecret!!, false, inputFd.fd, outputFd.fd)
+                    RustyCrypto.doubleEncryptFd(finalSharedSecret!!, false, inputFd.fd, outputFd.fd)
                 } catch (e: Exception) {
                     -1
                 } finally {
@@ -401,7 +390,7 @@ class SecureShareManualFileActivity : AppCompatActivity() {
                 val outputFd = ParcelFileDescriptor.open(outputFile, ParcelFileDescriptor.MODE_CREATE or ParcelFileDescriptor.MODE_WRITE_ONLY)
 
                 val success = try {
-                    RustyCrypto.tripleDecryptFd(finalSharedSecret!!, false, inputFd.fd, outputFd.fd)
+                    RustyCrypto.doubleDecryptFd(finalSharedSecret!!, false, inputFd.fd, outputFd.fd)
                 } catch (e: Exception) {
                     -1
                 } finally {
@@ -462,8 +451,6 @@ class SecureShareManualFileActivity : AppCompatActivity() {
     }
 
     private fun resetStates() {
-        senderState = null
-        receiverState = null
         finalSharedSecret = null
     }
 

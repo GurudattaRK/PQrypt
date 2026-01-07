@@ -6,6 +6,7 @@ plugins {
 android {
     namespace = "com.pqrypt.app"
     compileSdk = 36
+    ndkVersion = "27.0.12077973"
 
     defaultConfig {
         applicationId = "com.pqrypt.app"
@@ -15,6 +16,11 @@ android {
         versionName = "1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        
+        // Only build for ARM64 since we have OpenSSL/liboqs static libs for ARM64
+        ndk {
+            abiFilters += listOf("arm64-v8a")
+        }
         
         // Enable 16KiB page size support
         externalNativeBuild {

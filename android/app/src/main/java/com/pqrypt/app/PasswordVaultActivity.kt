@@ -253,13 +253,13 @@ class PasswordVaultActivity : AppCompatActivity() { // UI to derive, display, an
         // Run all Argon2 operations on background thread to prevent UI blocking and crashes
         passwordGenerationJob = CoroutineScope(Dispatchers.IO).launch {
             try {
-                val finalHash = RustyCrypto.derivePasswordHashUnified128(
+                val finalHash = RustyCrypto.derivePasswordHashUnified64(
                     appName.toByteArray(),
                     appPassword.toByteArray(),
                     masterPassword.toByteArray()
                 )
                 if (!isActive) return@launch
-                if (finalHash == null || finalHash.size != 128) {
+                if (finalHash == null || finalHash.size != 64) {
                     withContext(Dispatchers.Main) {
                         binding.btnGeneratePassword.isEnabled = true
                         binding.btnGeneratePassword.text = "Generate Password"
@@ -453,11 +453,12 @@ class PasswordVaultActivity : AppCompatActivity() { // UI to derive, display, an
 
     private fun checkNativeLibrary(): Boolean { // Sanity-check that JNI is loaded and functional
         return try {
-            // Test a simple native call to verify library is loaded
-            val testSalt = ByteArray(16) { 0 } // Dummy salt
-            val testPassword = "test".toByteArray() // Dummy input
-            RustyCrypto.argon2Hash(testPassword, testSalt, 32) // Should succeed
-            true // JNI OK
+            val testHash = RustyCrypto.derivePasswordHashUnified64(
+                "app".toByteArray(),
+                ByteArray(0),
+                "test".toByteArray()
+            )
+            testHash != null && testHash.size == 64
         } catch (e: UnsatisfiedLinkError) {
             false
         } catch (e: Exception) {

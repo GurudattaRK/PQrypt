@@ -6,6 +6,7 @@ import android.net.Uri
 import android.os.Bundle
 import android.os.Environment
 import android.widget.Toast
+import android.view.View
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import com.pqrypt.app.databinding.ActivityKeyExchangeProcessBinding
@@ -36,7 +37,6 @@ class KeyExchangeProcessActivity : AppCompatActivity() { // Guided UI for 3-mess
     private var finalSharedSecret: ByteArray? = null // Final 56-byte shared secret (final.key)
     // Bundles/files in the 3-message flow
     private var receiverResponseBundle: ByteArray? = null // 2.key bundle from Receiver
-    private var senderFinalBundle: ByteArray? = null // 3.key bundle from Sender
     
     // Layered hybrid state objects
     private var senderState: Any? = null // Sender state for layered hybrid exchange
@@ -47,6 +47,9 @@ class KeyExchangeProcessActivity : AppCompatActivity() { // Guided UI for 3-mess
     private var pendingOutputBytes: ByteArray? = null // Bytes queued for save
     private var pendingSuggestedName: String? = null // Filename suggestion for saving
     private var pendingSuccessToast: String? = null // Success message after save
+    private var pendingSecondBytes: ByteArray? = null
+    private var pendingSecondName: String? = null
+    private var pendingSecondSuccess: String? = null
 
     private val pickFolderLauncher = registerForActivityResult( // Launcher for choosing output folder
         ActivityResultContracts.StartActivityForResult()
@@ -117,31 +120,36 @@ class KeyExchangeProcessActivity : AppCompatActivity() { // Guided UI for 3-mess
         }
 
         binding.btnOpenKeyFile.setOnClickListener { // Pick a .key file for current step
-            openFilePicker() // Launch SAF picker
+            if (isSender && currentStep == 1) {
+                generateKeyFile() // Sender starts by generating 1.key
+            } else {
+                openFilePicker() // Otherwise pick the required key file
+            }
         }
 
-        binding.btnGenerateKeyFile.setOnClickListener { // Generate the next message or final.key
-            generateKeyFile() // Dispatch to role/step-specific generation
-        }
+        binding.btnGenerateKeyFile.visibility = View.GONE // Single-button flow; hide explicit generate
     }
 
     private fun updateStatus() { // Update status text based on role and current step
         val role = if (isSender) "Sender" else "Receiver" // Prefix role label
         val stepDescription = when { // Compute instruction for the current state
-            isSender && currentStep == 1 -> "Step 1: Press 'Generate Key File' button to create 1.key"
-            isSender && currentStep == 2 && receiverResponseBundle == null -> "Step 2: Press 'Open Key File' button and select 2.key received from receiver"
-            isSender && currentStep == 2 && receiverResponseBundle != null && senderFinalBundle == null -> "Step 2: Great! Now press 'Generate Key File' button to create 3.key"
-            isSender && currentStep == 3 && senderFinalBundle != null && finalSharedSecret == null -> "Step 3: Send 3.key to receiver, then press 'Generate Key File' button to create final.key"
-            isSender && currentStep == 4 -> "✅ Complete! final.key has been generated and saved"
-            !isSender && currentStep == 1 && senderKyberPk == null -> "Step 1: Press 'Open Key File' button and select 1.key received from sender"
-            !isSender && currentStep == 2 && senderKyberPk != null -> "Step 2: Press 'Generate Key File' button to create 2.key"
-            !isSender && currentStep == 3 && senderFinalBundle == null -> "Step 3: Press 'Open Key File' button and select 3.key received from sender"
-            !isSender && currentStep == 3 && senderFinalBundle != null && finalSharedSecret == null -> "Step 3: Great! Now press 'Generate Key File' button to create final.key"
-            !isSender && currentStep == 4 -> "✅ Complete! final.key has been generated and saved"
+            isSender && currentStep == 1 -> "Step 1: Tap 'Start' to create 1.key"
+            isSender && currentStep == 2 && receiverResponseBundle == null -> "Step 2: Tap 'Open 2.key' (bundle) from receiver to generate 3.key and final.key"
+            isSender && currentStep == 3 -> "✅ Complete! 3.key and final.key generated. Send 3.key to receiver"
+            !isSender && currentStep == 1 && senderKyberPk == null -> "Step 1: Tap 'Open 1.key' from sender to generate 2.key"
+            !isSender && currentStep == 2 -> "Step 2: Send 2.key to sender, then tap 'Open 3.key' when you receive it"
+            !isSender && currentStep >= 3 -> "✅ Complete! final.key has been generated and saved"
             else -> "Process complete"
         }
         
         binding.tvStatus.text = "$role: $stepDescription" // Render guidance
+        when {
+            isSender && currentStep == 1 -> binding.btnOpenKeyFile.text = "Start"
+            isSender && currentStep == 2 -> binding.btnOpenKeyFile.text = "Open 2.key"
+            !isSender && currentStep == 1 -> binding.btnOpenKeyFile.text = "Open 1.key"
+            !isSender && currentStep == 2 -> binding.btnOpenKeyFile.text = "Open 3.key"
+            else -> binding.btnOpenKeyFile.text = "Open Key File"
+        }
     }
 
     private fun openFilePicker() { // Launch a get-content picker for any file
@@ -174,27 +182,36 @@ class KeyExchangeProcessActivity : AppCompatActivity() { // Guided UI for 3-mess
         CoroutineScope(Dispatchers.IO).launch { // Allow potential parsing to run off UI
             try {
                 when {
-                    isSender && currentStep == 2 -> { // Sender consumes 2.key from receiver
-                        receiverResponseBundle = keyData // Store receiver's response bundle
+                    isSender && currentStep == 2 -> { // Sender consumes 2.key bundle from receiver
+                        receiverResponseBundle = keyData // Store receiver's bundle (package2_a||package1_b)
                         withContext(Dispatchers.Main) {
-                            updateStatus() // Refresh instructions
-                            Toast.makeText(this@KeyExchangeProcessActivity, "2.key loaded successfully! Now press 'Generate Key File' to create 3.key", Toast.LENGTH_LONG).show() // Guide next action
+                            updateStatus()
+                            Toast.makeText(this@KeyExchangeProcessActivity, "2.key bundle loaded! Generating 3.key and final.key...", Toast.LENGTH_LONG).show()
                         }
+                        generateKeyFile() // Auto-generate 3.key and final.key
                     }
                     !isSender && currentStep == 1 -> { // Receiver consumes 1.key (sender's public key)
-                        senderKyberPk = keyData // Save sender's Kyber public key
-                        currentStep = 2 // Advance to step 2
-                        
+                        senderKyberPk = keyData
                         withContext(Dispatchers.Main) {
-                            updateStatus() // Refresh UI status
-                            Toast.makeText(this@KeyExchangeProcessActivity, "1.key loaded successfully! Now press 'Generate Key File' to create 2.key", Toast.LENGTH_LONG).show() // Confirmation
+                            updateStatus()
+                            Toast.makeText(this@KeyExchangeProcessActivity, "1.key loaded! Generating 2.key...", Toast.LENGTH_LONG).show()
                         }
+                        generateKeyFile() // Auto-generate 2.key (bundle)
                     }
-                    !isSender && currentStep == 3 -> { // Receiver consumes 3.key (sender's final bundle)
-                        senderFinalBundle = keyData // Save sender's final bundle
+                    !isSender && currentStep == 2 -> { // Receiver consumes 3.key to finalize
+                        val finalKey: ByteArray? = RustyCrypto.hybridReceiverFinalDual(keyData)
+                        if (finalKey == null || finalKey.isEmpty()) {
+                            withContext(Dispatchers.Main) {
+                                Toast.makeText(this@KeyExchangeProcessActivity, "Failed to finalize with 3.key", Toast.LENGTH_LONG).show()
+                            }
+                            return@launch
+                        }
+                        finalSharedSecret = finalKey
                         withContext(Dispatchers.Main) {
-                            updateStatus() // Refresh instructions
-                            Toast.makeText(this@KeyExchangeProcessActivity, "3.key loaded successfully! Now press 'Generate Key File' to create final.key", Toast.LENGTH_LONG).show() // Guide next action
+                            queueSaveAndPersist("final.key", finalKey, "final.key generated successfully!")
+                            currentStep = 3
+                            updateStatus()
+                            Toast.makeText(this@KeyExchangeProcessActivity, "final.key generated!", Toast.LENGTH_LONG).show()
                         }
                     }
                 }
@@ -210,125 +227,90 @@ class KeyExchangeProcessActivity : AppCompatActivity() { // Guided UI for 3-mess
         CoroutineScope(Dispatchers.IO).launch { // Run heavy work off UI thread
             try {
                 when {
-                    isSender && currentStep == 1 -> { // Sender: create 1.key (initial keypair)
-                        // Use proper PQC 4-algorithm hybrid functions (ML-KEM+X448 and HQC+P521)
-                        val result = RustyCrypto.pqc4HybridInit() as Array<*> // Returns [hybrid1Key, senderState]
-                        val hybrid1Key = result[0] as ByteArray // Combined ML-KEM+HQC public keys
-                        val senderState = result[1] as ByteArray // Serialized sender state
+                    isSender && currentStep == 1 -> { // Sender: create 1.key (package1)
+                        // New protocol: hybridSenderInit() returns just package1
+                        val package1: ByteArray? = RustyCrypto.hybridSenderInit()
+                        if (package1 == null || package1.isEmpty()) {
+                            withContext(Dispatchers.Main) {
+                                Toast.makeText(this@KeyExchangeProcessActivity, "Key generation failed. PQC not available.", Toast.LENGTH_LONG).show()
+                            }
+                            return@launch
+                        }
                         
-                        // Save hybrid keys and state
-                        senderKyberPk = hybrid1Key // Store hybrid1Key as "public key"
-                        senderKyberSk = senderState // Store sender state as "secret key"
-                        
-                        queueSaveAndPersist("1.key", hybrid1Key, "1.key generated successfully!") // Queue save of 1.key
+                        queueSaveAndPersist("1.key", package1, "1.key generated successfully!")
                         currentStep = 2 // Move to step 2
                         
                         withContext(Dispatchers.Main) {
-                            updateStatus() // Refresh UI
-                            Toast.makeText(this@KeyExchangeProcessActivity, "1.key generated! Send it to the receiver and wait for their 2.key", Toast.LENGTH_LONG).show() // Notify
+                            updateStatus()
+                            Toast.makeText(this@KeyExchangeProcessActivity, "1.key generated! Send it to the receiver and wait for their 2.key", Toast.LENGTH_LONG).show()
                         }
                     }
-                    isSender && currentStep == 2 -> { // Sender: produce 3.key after reading 2.key
-                        if (receiverResponseBundle == null) { // Guard: need 2.key first
+                    isSender && currentStep == 2 -> { // Sender: read 2.key bundle and generate 3.key + final.key
+                        if (receiverResponseBundle == null) {
                             withContext(Dispatchers.Main) {
-                                Toast.makeText(this@KeyExchangeProcessActivity, "Please read 2.key first, then press Generate", Toast.LENGTH_LONG).show() // Guidance
+                                Toast.makeText(this@KeyExchangeProcessActivity, "Please open 2.key first", Toast.LENGTH_LONG).show()
                             }
                             return@launch
                         }
-                        // Use proper PQC 4-algorithm hybrid functions (ML-KEM+X448 and HQC+P521)
-                        val result = RustyCrypto.pqc4HybridSndFinal(receiverResponseBundle!!, senderKyberSk!!) as Array<*> // Returns [finalKey(128B), hybrid3Key]
-                        val finalKey = result[0] as ByteArray // 128-byte final shared secret
-                        val hybrid3Key = result[1] as ByteArray // Final exchange data for receiver
-                        
-                        senderFinalBundle = hybrid3Key // Store 3.key for sending to receiver
-                        finalSharedSecret = finalKey // Store final shared secret (128 bytes)
-                        
-                        withContext(Dispatchers.Main) {
-                            queueSaveAndPersist("3.key", hybrid3Key, "3.key generated successfully!") // Queue save
-                            currentStep = 3 // Next step
-                            updateStatus() // Update UI
-                            Toast.makeText(this@KeyExchangeProcessActivity, "3.key generated! Send it to the receiver, then press 'Generate Key File' to create your final.key", Toast.LENGTH_LONG).show() // Instruction
-                        }
-                    }
-                    isSender && currentStep == 3 -> { // Sender finalization: save final.key locally
-                        if (finalSharedSecret == null) { // Ensure we computed it
+                        val result = RustyCrypto.hybridSenderThird(receiverResponseBundle!!)
+                        if (result == null || result.size != 2) {
                             withContext(Dispatchers.Main) {
-                                Toast.makeText(this@KeyExchangeProcessActivity, "No final key computed. Ensure 2.key was read and 3.key created.", Toast.LENGTH_LONG).show() // Warn
+                                Toast.makeText(this@KeyExchangeProcessActivity, "Failed to process 2.key bundle.", Toast.LENGTH_LONG).show()
                             }
                             return@launch
                         }
-                        withContext(Dispatchers.Main) {
-                            queueSaveAndPersist("final.key", finalSharedSecret!!, "final.key generated") // Save final.key
-                            updateStatus() // UI refresh
-                            Toast.makeText(this@KeyExchangeProcessActivity, "final.key generated", Toast.LENGTH_SHORT).show() // Confirm
+                        val package3 = (result[0] as? ByteArray)
+                        val finalKey = (result[1] as? ByteArray)
+                        if (package3 == null || finalKey == null || package3.isEmpty() || finalKey.isEmpty()) {
+                            withContext(Dispatchers.Main) {
+                                Toast.makeText(this@KeyExchangeProcessActivity, "Invalid data from native layer.", Toast.LENGTH_LONG).show()
+                            }
+                            return@launch
                         }
-                        currentStep = 4 // Complete
+                        finalSharedSecret = finalKey
+                        if (pickedFolderUri != null) {
+                            withContext(Dispatchers.Main) {
+                                saveDirect("3.key", package3, "3.key generated successfully!")
+                                saveDirect("final.key", finalKey, "final.key generated successfully!")
+                                currentStep = 3
+                                updateStatus()
+                                Toast.makeText(this@KeyExchangeProcessActivity, "3.key and final.key generated! Send 3.key to receiver.", Toast.LENGTH_LONG).show()
+                            }
+                        } else {
+                            queueSaveAndPersist("3.key", package3, "3.key generated successfully!")
+                            withContext(Dispatchers.Main) {
+                                pendingSecondBytes = finalKey
+                                pendingSecondName = "final.key"
+                                pendingSecondSuccess = "final.key generated successfully!"
+                                currentStep = 3
+                                updateStatus()
+                                Toast.makeText(this@KeyExchangeProcessActivity, "3.key and final.key generated! Send 3.key to receiver.", Toast.LENGTH_LONG).show()
+                            }
+                        }
                     }
-                    !isSender && currentStep == 1 -> { // Receiver: create 2.key after reading 1.key
+                    !isSender && currentStep == 1 -> { // Receiver: create 2.key bundle after reading 1.key
                         if (senderKyberPk == null) { // Guard: need 1.key first
                             withContext(Dispatchers.Main) {
                                 Toast.makeText(this@KeyExchangeProcessActivity, "Please read 1.key first", Toast.LENGTH_SHORT).show()
                             }
                             return@launch
                         }
-                        
-                        // Use proper PQC 4-algorithm hybrid functions (ML-KEM+X448 and HQC+P521)
-                        val result = RustyCrypto.pqc4HybridRecv(senderKyberPk!!) as Array<*> // Returns [hybrid2Key, receiverState]
-                        val hybrid2Key = result[0] as ByteArray // Combined ML-KEM+HQC ciphertexts and X448+P521 public keys
-                        val receiverState = result[1] as ByteArray // Serialized receiver state
-                        
-                        // Save hybrid keys and state
-                        receiverResponseBundle = hybrid2Key // Store hybrid2Key as response bundle
-                        receiverKyberSk = receiverState // Store receiver state as "secret key"
-                        
-                        queueSaveAndPersist("2.key", hybrid2Key, "2.key generated successfully!") // Queue save of 2.key
-                        currentStep = 3 // Move to step 3
-                        
-                        withContext(Dispatchers.Main) {
-                            updateStatus() // Refresh UI
-                            Toast.makeText(this@KeyExchangeProcessActivity, "2.key generated! Send it to the sender and wait for their 3.key", Toast.LENGTH_LONG).show() // Instruction
-                        }
-                    }
-                    !isSender && currentStep == 2 -> { // Receiver: generate 2.key response
-                        if (senderKyberPk == null) { // Need 1.key first
+                        val bundle: ByteArray? = RustyCrypto.hybridReceiverDual(senderKyberPk!!)
+                        if (bundle == null || bundle.isEmpty()) {
                             withContext(Dispatchers.Main) {
-                                Toast.makeText(this@KeyExchangeProcessActivity, "Error: Sender's public key not available. Please read 1.key first.", Toast.LENGTH_LONG).show() // Warn
+                                Toast.makeText(this@KeyExchangeProcessActivity, "Failed to generate 2.key bundle.", Toast.LENGTH_LONG).show()
                             }
                             return@launch
                         }
-                        // Use proper PQC 4-algorithm hybrid functions (ML-KEM+X448 and HQC+P521)
-                        val result = RustyCrypto.pqc4HybridRecv(senderKyberPk!!) as Array<*> // Returns [hybrid2Key, receiverState]
-                        val bundledData = result[0] as ByteArray // 2.key (hybrid2Key with ML-KEM+HQC bundles)
-                        receiverKyberSk = result[1] as ByteArray // Serialized receiver state
-                        receiverP521Sk = ByteArray(66) { 0x33 }
-                        
-                        queueSaveAndPersist("2.key", bundledData, "2.key generated successfully!") // Save 2.key
-                        currentStep = 3 // Move to step 3
+                        queueSaveAndPersist("2.key", bundle, "2.key generated successfully!")
+                        currentStep = 2
                         
                         withContext(Dispatchers.Main) {
                             updateStatus() // Refresh UI
-                            Toast.makeText(this@KeyExchangeProcessActivity, "2.key generated! Send it to the sender and wait for their 3.key", Toast.LENGTH_LONG).show() // Instruction
+                            Toast.makeText(this@KeyExchangeProcessActivity, "2.key generated! Send it to sender. Then open 3.key when you receive it.", Toast.LENGTH_LONG).show()
                         }
                     }
-                    !isSender && currentStep == 3 -> { // Receiver: finalize using 3.key
-                        if (senderFinalBundle == null || receiverKyberSk == null) { // Guard: need 3.key and receiver state
-                            withContext(Dispatchers.Main) {
-                                Toast.makeText(this@KeyExchangeProcessActivity, "Please read 3.key first", Toast.LENGTH_LONG).show() // Prompt
-                            }
-                            return@launch
-                        }
-
-                        // Use proper PQC 4-algorithm hybrid functions (ML-KEM+X448 and HQC+P521)
-                        val finalKey = RustyCrypto.pqc4HybridRecvFinal(senderFinalBundle!!, receiverKyberSk!!) // Returns finalKey(128B)
-                        finalSharedSecret = finalKey // Store final shared secret (128 bytes)
-                        
-                        withContext(Dispatchers.Main) {
-                            queueSaveAndPersist("final.key", finalKey, "final.key generated successfully!") // Save final.key
-                            currentStep = 4 // Done
-                            updateStatus() // UI refresh
-                            Toast.makeText(this@KeyExchangeProcessActivity, "Success! final.key has been generated and saved. You can now use it for secure communication.", Toast.LENGTH_LONG).show() // Confirm
-                        }
-                    }
+                    
                     else -> { // Any other state
                         withContext(Dispatchers.Main) {
                             Toast.makeText(this@KeyExchangeProcessActivity, "Invalid step for key generation", Toast.LENGTH_SHORT).show() // Inform
@@ -345,15 +327,31 @@ class KeyExchangeProcessActivity : AppCompatActivity() { // Guided UI for 3-mess
     }
 
     private fun queueSaveAndPersist(filename: String, keyData: ByteArray, successMsg: String) { // Prepare and trigger save
-        CoroutineScope(Dispatchers.Main).launch { // Touch UI and launch pickers on main thread
-            pendingOutputBytes = keyData // Data to write
-            pendingSuggestedName = filename // File name suggestion
-            pendingSuccessToast = successMsg // Success message
-            if (pickedFolderUri != null) { // If we already have a folder
-                saveToPickedFolder() // Save immediately
+        CoroutineScope(Dispatchers.Main).launch {
+            if (pickedFolderUri != null) {
+                saveDirect(filename, keyData, successMsg)
             } else {
-                launchPickFolder() // Prompt user to choose destination
+                pendingOutputBytes = keyData
+                pendingSuggestedName = filename
+                pendingSuccessToast = successMsg
+                launchPickFolder()
             }
+        }
+    }
+
+    private fun saveDirect(filename: String, keyData: ByteArray, successMsg: String) {
+        val folderUri = pickedFolderUri ?: return
+        try {
+            val outUri = createUniqueDocumentCopySuffix(folderUri, "application/octet-stream", filename)
+            if (outUri != null) {
+                contentResolver.openOutputStream(outUri)?.use { it.write(keyData) }
+                binding.tvGeneratedFilePath.text = "Saved to: $outUri"
+                Toast.makeText(this, successMsg, Toast.LENGTH_SHORT).show()
+            } else {
+                Toast.makeText(this, "Failed to create file in selected folder", Toast.LENGTH_LONG).show()
+            }
+        } catch (e: Exception) {
+            Toast.makeText(this, "Save failed: ${e.message}", Toast.LENGTH_LONG).show()
         }
     }
 
@@ -402,12 +400,25 @@ class KeyExchangeProcessActivity : AppCompatActivity() { // Guided UI for 3-mess
             } else {
                 Toast.makeText(this, "Failed to create file in selected folder", Toast.LENGTH_LONG).show() // Report error
             }
+            if (pendingSecondBytes != null && !pendingSecondName.isNullOrEmpty()) {
+                val outUri2 = createUniqueDocumentCopySuffix(folderUri, "application/octet-stream", pendingSecondName!!)
+                if (outUri2 != null) {
+                    contentResolver.openOutputStream(outUri2)?.use { it.write(pendingSecondBytes) }
+                    binding.tvGeneratedFilePath.text = "Saved to: $outUri2"
+                    Toast.makeText(this, pendingSecondSuccess ?: "Saved", Toast.LENGTH_SHORT).show()
+                } else {
+                    Toast.makeText(this, "Failed to create file in selected folder", Toast.LENGTH_LONG).show()
+                }
+            }
         } catch (e: Exception) {
             Toast.makeText(this, "Save failed: ${e.message}", Toast.LENGTH_LONG).show() // Report exception
         } finally {
             pendingOutputBytes = null // Clear pending state
             pendingSuggestedName = null
             pendingSuccessToast = null
+            pendingSecondBytes = null
+            pendingSecondName = null
+            pendingSecondSuccess = null
         }
     }
 

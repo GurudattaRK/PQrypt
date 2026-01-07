@@ -1,8 +1,8 @@
 use super::constants_errors::*;
-use super::symmetric::argon2id_hash;
+use crate::crypto_core::func::argon2id_derive;
 use std::collections::HashMap;
 
-const MAX_PASSWORD_LEN: usize = 128;
+const MAX_PASSWORD_LEN: usize = 64;
 
 struct PasswordGenerator {
     required_sets: HashMap<&'static str, &'static str>,
@@ -27,23 +27,27 @@ impl PasswordGenerator {
 
     // MARK: hkdf
     fn hkdf(&self, salt: &[u8], ikm: &[u8], info: &[u8], len: usize) -> Vec<u8> {
-        let mut salt_array = [0u8; 32];
-        let copy_len = salt.len().min(32);
+        let mut salt_array = [0u8; 16];
+        let copy_len = salt.len().min(16);
         salt_array[..copy_len].copy_from_slice(&salt[..copy_len]);
-        let prk = argon2id_hash(ikm, &salt_array, 32, 1024, 1, 1)
+
+        let mut ikm_copy = ikm.to_vec();
+        let prk = argon2id_derive(&mut ikm_copy, &mut salt_array, 32)
             .unwrap_or_else(|_| vec![0u8; 32]);
+
         let mut output = Vec::new();
         let mut counter = 1u8;
         while output.len() < len {
             let mut input = prk.clone();
             input.extend_from_slice(info);
             input.push(counter);
-            
-            let mut info_salt = [0u8; 32];
-            let info_len = info.len().min(32);
+
+            let mut info_salt = [0u8; 16];
+            let info_len = info.len().min(16);
             info_salt[..info_len].copy_from_slice(&info[..info_len]);
-            
-            let block = argon2id_hash(&input, &info_salt, 32, 1024, 1, 1)
+
+            let mut input_copy = input.clone();
+            let block = argon2id_derive(&mut input_copy, &mut info_salt, 32)
                 .unwrap_or_else(|_| vec![0u8; 32]);
             output.extend_from_slice(&block);
             counter += 1;
@@ -56,8 +60,10 @@ impl PasswordGenerator {
     fn unbiased_select(&self, mut value: u32, max: usize) -> usize {
         let threshold = u32::MAX - (u32::MAX % max as u32);
         while value >= threshold {
-            let salt = *b"bias_elimination_salt_32_bytes__";
-            let hash = argon2id_hash(&value.to_be_bytes(), &salt, 4, 1024, 1, 1)
+            let mut salt_array = [0u8; 16];
+            salt_array.copy_from_slice(b"bias_elimination"); // 16-byte salt
+            let mut value_bytes = value.to_be_bytes().to_vec();
+            let hash = argon2id_derive(&mut value_bytes, &mut salt_array, 4)
                 .unwrap_or_else(|_| vec![0u8; 4]);
             value = u32::from_be_bytes([hash[0], hash[1], hash[2], hash[3]]);
         }
@@ -161,19 +167,22 @@ pub fn derive_password_hash_secure(
     master_password: &str,
     salt_source: &str
 ) -> Result<Vec<u8>, CryptoError> {
-    let mut salt = [0u8; 32];
+    let mut salt = [0u8; 16]; // Changed from 32 to 16 bytes
     let salt_bytes = salt_source.as_bytes();
-    let copy_len = salt_bytes.len().min(32);
+    let copy_len = salt_bytes.len().min(16);
     salt[..copy_len].copy_from_slice(&salt_bytes[..copy_len]);
-    
-    let first_hash = argon2id_hash(master_password.as_bytes(), &salt, 64, 10240, 1, 1)?;
-    
+
+    let mut master_bytes = master_password.as_bytes().to_vec();
+    let first_hash = argon2id_derive(&mut master_bytes, &mut salt, 64)
+        .map_err(|_| CryptoError::HashingFailed)?;
+
     if !app_password.is_empty() {
-        let mut app_salt = [0u8; 32];
+        let mut app_salt = [0u8; 16]; // Changed from 32 to 16 bytes
         let app_salt_bytes = app_password.as_bytes();
-        let app_copy_len = app_salt_bytes.len().min(32);
+        let app_copy_len = app_salt_bytes.len().min(16);
         app_salt[..app_copy_len].copy_from_slice(&app_salt_bytes[..app_copy_len]);
-        argon2id_hash(&first_hash, &app_salt, 64, 10240, 1, 1)
+        argon2id_derive(&mut first_hash.clone(), &mut app_salt, 64)
+            .map_err(|_| CryptoError::HashingFailed)
     } else {
         Ok(first_hash)
     }

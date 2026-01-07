@@ -33,12 +33,12 @@ class FileEncryptionActivity : AppCompatActivity() { // UI for selecting files a
     private lateinit var binding: ActivityFileEncryptionBinding // Late-init view binding for this layout
     private var selectedFileUri: Uri? = null // Currently chosen input file URI
     private var selectedFilePath: String = "" // Display name/path for UI feedback
-    private var passwordKey: ByteArray? = null // Derived 128-byte key for crypto operations
+    private var passwordKey: ByteArray? = null // Derived 64-byte key for crypto operations
     private var currentSalt: ByteArray? = null // Placeholder for salt if/when used
     // Key-file flow state
     private var isUsingKeyFile: Boolean = false // Whether key-file mode is active instead of password text
     private var selectedKeyFileUri: Uri? = null // Chosen key file URI
-    private var keyFileFirst128: ByteArray? = null // Cached bytes from key file used for derivation
+    private var keyFileFirst64: ByteArray? = null // Cached bytes from key file used for derivation
     // Pending output when using the SAF create-document flow
     private var pendingOutputBytes: ByteArray? = null // Stash encrypted data for saving
     private var pendingSuggestedName: String? = null // Stash filename suggestion
@@ -81,8 +81,8 @@ class FileEncryptionActivity : AppCompatActivity() { // UI for selecting files a
                         return@let // Abort
                     }
                     selectedKeyFileUri = uri // Remember the key file URI
-                    // Store only first 128 bytes for streaming API compatibility
-                    keyFileFirst128 = allBytes.take(128).toByteArray() // Cache first 128 bytes for derivation
+                    // Store only first 64 bytes for hashing
+                    keyFileFirst64 = allBytes.take(64).toByteArray() // Cache first 64 bytes for derivation
                     isUsingKeyFile = true // Switch UI/logic into key-file mode
                     // Derive a session key to enable buttons (real derivation done again with fresh salt per op)
                     deriveKeyFromKeyFilePreview() // Perform preview derivation to enable actions
@@ -235,7 +235,7 @@ class FileEncryptionActivity : AppCompatActivity() { // UI for selecting files a
                     if (isUsingKeyFile) { // If previously using key-file mode, revert to password mode
                         isUsingKeyFile = false // Disable key-file mode
                         selectedKeyFileUri = null // Clear chosen key file
-                        keyFileFirst128 = null // Clear cached key bytes
+                        keyFileFirst64 = null // Clear cached key bytes
                         binding.etPassword.isEnabled = true // Re-enable password field
                         binding.tvKeyFilePath.text = "Key file: None" // Reflect state in UI
                     }
@@ -370,22 +370,15 @@ class FileEncryptionActivity : AppCompatActivity() { // UI for selecting files a
         if (password.isNotEmpty()) { // Only derive when non-empty
             CoroutineScope(Dispatchers.IO).launch { // Work off the main thread
                 try {
-                    // Argon2-only 128B with NO SALT (deterministic across platforms)
-                    val salt = ByteArray(0) // Empty salt for deterministic behavior
-                    val argonOut = RustyCrypto.argon2Hash( // Call into native to derive bytes
-                        password.toByteArray(),
-                        salt,
-                        128
-                    )
-                    if (argonOut == null || argonOut.size != 128) { // Validate output length
+                    val bytes = password.toByteArray()
+                    if (bytes.isEmpty()) {
                         withContext(Dispatchers.Main) {
-                            passwordKey = null // Clear on failure
-                            updateButtonStates() // Reflect disabled actions
-                            Toast.makeText(this@FileEncryptionActivity, "Key derivation failed: Argon2(128) output invalid", Toast.LENGTH_LONG).show() // Inform user
+                            passwordKey = null
+                            updateButtonStates()
                         }
-                        return@launch // Abort
+                        return@launch
                     }
-                    passwordKey = argonOut // Store derived key
+                    passwordKey = bytes // Store raw password bytes as secret
 
                     withContext(Dispatchers.Main) { // Back to UI thread
                         updateButtonStates() // Enable actions
@@ -401,31 +394,10 @@ class FileEncryptionActivity : AppCompatActivity() { // UI for selecting files a
     }
 
     private fun deriveKeyFromKeyFilePreview() { // Derive a usable session key from the selected key file (no salt)
-        val keySrc = keyFileFirst128 ?: return // Abort if no key bytes cached
+        val keySrc = keyFileFirst64 ?: return // Abort if no key bytes cached
         CoroutineScope(Dispatchers.IO).launch { // Work off the main thread
             try {
-                // Argon2-only 128B with NO SALT (deterministic across platforms)
-                val salt = ByteArray(0) // Empty salt for deterministic behavior
-                val argonOut = RustyCrypto.argon2Hash(keySrc, salt, 128) // Derive 128 bytes from key file material
-                if (argonOut == null || argonOut.size != 128) { // Validate output
-                    withContext(Dispatchers.Main) {
-                        passwordKey = null // Clear on failure
-                        updateButtonStates() // Reflect disabled actions
-                        Toast.makeText(this@FileEncryptionActivity, "Key derivation failed (key file)", Toast.LENGTH_LONG).show() // Inform user
-                    }
-                    return@launch // Abort
-                }
-                // HKDF-expand the Argon2 output to a final 128-byte master key
-                val expanded = hkdfSha256Expand(prk = hkdfExtract(salt, argonOut), info = "PQryptMasterKey".toByteArray(), length = 128)
-                if (expanded.size != 128) { // Validate expanded length
-                    withContext(Dispatchers.Main) {
-                        passwordKey = null // Clear on failure
-                        updateButtonStates() // Reflect disabled actions
-                        Toast.makeText(this@FileEncryptionActivity, "HKDF expand failed (key file)", Toast.LENGTH_LONG).show() // Inform user
-                    }
-                    return@launch // Abort
-                }
-                passwordKey = expanded // Store final key
+                passwordKey = keySrc // Store raw key-file bytes as secret
                 withContext(Dispatchers.Main) { updateButtonStates() } // Update UI
             } catch (e: Exception) { // Handle derivation errors
                 withContext(Dispatchers.Main) {
@@ -440,15 +412,8 @@ class FileEncryptionActivity : AppCompatActivity() { // UI for selecting files a
             val startTime = System.currentTimeMillis()
             try {
                 
-                // Derive secret from password or key file
-                val secret = if (isUsingKeyFile) {
-                    val keyBytes = keyFileFirst128 ?: throw IllegalStateException("No key file bytes available")
-                    // Ensure we only use first 128 bytes for streaming API compatibility
-                    if (keyBytes.size > 128) keyBytes.take(128).toByteArray() else keyBytes
-                } else {
-                    val derivedKey = passwordKey ?: throw IllegalStateException("No password key available")
-                    derivedKey
-                }
+                // Derive secret from password or key file (both are hashed to 64 bytes in passwordKey)
+                val secret = passwordKey ?: throw IllegalStateException("No password/key available")
                 
                 // Get input file name for output suggestion
                 val inputFileName = getFileNameFromUri(selectedFileUri!!) ?: "encrypted_file"
@@ -484,15 +449,8 @@ class FileEncryptionActivity : AppCompatActivity() { // UI for selecting files a
             val startTime = System.currentTimeMillis()
             try {
                 
-                // Derive secret from password or key file
-                val secret = if (isUsingKeyFile) {
-                    val keyBytes = keyFileFirst128 ?: throw IllegalStateException("No key file bytes available")
-                    // Ensure we only use first 128 bytes for streaming API compatibility
-                    if (keyBytes.size > 128) keyBytes.take(128).toByteArray() else keyBytes
-                } else {
-                    val derivedKey = passwordKey ?: throw IllegalStateException("No password key available")
-                    derivedKey
-                }
+                // Derive secret from password or key file (both are hashed to 64 bytes in passwordKey)
+                val secret = passwordKey ?: throw IllegalStateException("No password/key available")
                 
                 // Get input file name for output suggestion
                 val inputFileName = getFileNameFromUri(selectedFileUri!!) ?: "decrypted_file"
@@ -557,7 +515,7 @@ class FileEncryptionActivity : AppCompatActivity() { // UI for selecting files a
                 // Open file descriptors for streaming
                 val inputFd = contentResolver.openFileDescriptor(selectedFileUri!!, "r")
                     ?: throw IllegalStateException("Failed to open input file")
-                val outputFd = contentResolver.openFileDescriptor(outputUri, "w")
+                val outputFd = contentResolver.openFileDescriptor(outputUri, "rw")
                     ?: throw IllegalStateException("Failed to open output file")
                 
                 try {
@@ -569,10 +527,36 @@ class FileEncryptionActivity : AppCompatActivity() { // UI for selecting files a
                     }
                     
                     // Call streaming encryption
-                    val result = RustyCrypto.tripleEncryptFd(secret, isUsingKeyFile, inputFd.fd, outputFd.fd)
+                    val result = RustyCrypto.doubleEncryptFd(secret, isUsingKeyFile, inputFd.fd, outputFd.fd)
                     
-                    if (result != 0) {
-                        throw IllegalStateException("Encryption failed with code: $result")
+                    android.util.Log.d("FileEncryption", "doubleEncryptFd returned status code: $result")
+                    
+                    if (result != 103) {  // 103 = STATUS_RUST_SUCCESS
+                        val errorMessage = when (result) {
+                            -1 -> "Invalid input parameters"
+                            -3 -> "KEY DERIVATION FAILED - Argon2 error in Rust crypto layer"
+                            -4 -> "Encryption operation failed"
+                            -6 -> "IO error or other failure"
+                            100 -> "Reached C function entry"
+                            101 -> "Passed input validation"
+                            102 -> "About to call Rust function"
+                            103 -> "Rust function completed successfully"
+                            104 -> "Rust function returned error"
+                            105 -> "Rust encryption started"
+                            106 -> "Rust encryption key derived"
+                            107 -> "Rust encryption file read"
+                            108 -> "Rust encryption double encrypt"
+                            109 -> "Rust encryption header write"
+                            else -> "Unknown status code: $result"
+                        }
+                        // Delete partial output file on failure
+                        try {
+                            contentResolver.delete(outputUri, null, null)
+                            android.util.Log.d("FileEncryption", "Deleted partial output file after failure")
+                        } catch (deleteEx: Exception) {
+                            android.util.Log.e("FileEncryption", "Failed to delete partial output: ${deleteEx.message}")
+                        }
+                        throw IllegalStateException("Encryption failed with status code $result: $errorMessage")
                     }
                     
                     val elapsedTime = System.currentTimeMillis() - startTime
@@ -603,15 +587,25 @@ class FileEncryptionActivity : AppCompatActivity() { // UI for selecting files a
                 val secret = pendingDecryptionSecret ?: return@launch
                 val suggestedName = pendingSuggestedName ?: "decrypted.bin"
                 
+                android.util.Log.d("FileEncryption", "=== DECRYPTION START (picked folder) ===")
+                android.util.Log.d("FileEncryption", "Secret size: ${secret.size}, isKeyFile: $isUsingKeyFile")
+                
                 // Create output file in picked folder
                 val outputUri = createFileInFolder(pickedFolderUri!!, suggestedName)
                     ?: throw IllegalStateException("Failed to create output file")
                 
+                android.util.Log.d("FileEncryption", "Output file created: $outputUri")
+                
                 // Open file descriptors for streaming
+                android.util.Log.d("FileEncryption", "Opening input file: $selectedFileUri")
                 val inputFd = contentResolver.openFileDescriptor(selectedFileUri!!, "r")
                     ?: throw IllegalStateException("Failed to open input file")
-                val outputFd = contentResolver.openFileDescriptor(outputUri, "w")
+                android.util.Log.d("FileEncryption", "Input FD: ${inputFd.fd}, stat size: ${inputFd.statSize}")
+                
+                android.util.Log.d("FileEncryption", "Opening output file for write")
+                val outputFd = contentResolver.openFileDescriptor(outputUri, "rw")
                     ?: throw IllegalStateException("Failed to open output file")
+                android.util.Log.d("FileEncryption", "Output FD: ${outputFd.fd}")
                 
                 try {
                     val startTime = System.currentTimeMillis()
@@ -621,22 +615,45 @@ class FileEncryptionActivity : AppCompatActivity() { // UI for selecting files a
                         binding.tvOutputPath.text = "Started processing your file, please wait...."
                     }
                     
+                    android.util.Log.d("FileEncryption", "Calling RustyCrypto.doubleDecryptFd()")
+                    
                     // Call streaming decryption
-                    val result = RustyCrypto.tripleDecryptFd(secret, isUsingKeyFile, inputFd.fd, outputFd.fd)
-                    if (result != 0) {
+                    val result = RustyCrypto.doubleDecryptFd(secret, isUsingKeyFile, inputFd.fd, outputFd.fd)
+                    
+                    android.util.Log.d("FileEncryption", "doubleDecryptFd returned status code: $result")
+                    
+                    if (result != 103) {  // 103 = STATUS_RUST_SUCCESS
+                        android.util.Log.e("FileEncryption", "!!! DECRYPTION FAILED with error code: $result !!!")
                         // Delete partial output on failure
                         try {
                             contentResolver.delete(outputUri, null, null)
+                            android.util.Log.d("FileEncryption", "Deleted partial output file")
                         } catch (deleteEx: Exception) {
+                            android.util.Log.e("FileEncryption", "Failed to delete partial: ${deleteEx.message}")
                         }
                         val errorMessage = when (result) {
-                            RustyCrypto.CRYPTO_ERROR_DECRYPTION_FAILED -> "Authentication/decryption failed. This may be due to file corruption, tampering, or wrong password/key file."
-                            RustyCrypto.CRYPTO_ERROR_INVALID_INPUT -> "Invalid input file. The file may be corrupted or not a valid encrypted file."
-                            RustyCrypto.CRYPTO_ERROR_NULL_POINTER -> "File access error. Please check file permissions."
-                            else -> "Decryption failed with error code: $result. This may be due to file corruption, tampering, or wrong password/key file."
+                            -1 -> "Invalid input parameters"
+                            -2 -> "Invalid input file format"
+                            -3 -> "KEY DERIVATION FAILED - Argon2 error in Rust crypto layer"
+                            -4 -> "Encryption operation failed"
+                            -5 -> "Authentication/decryption failed"
+                            -6 -> "IO error or other failure"
+                            100 -> "Reached C function entry"
+                            101 -> "Passed input validation"
+                            102 -> "About to call Rust function"
+                            103 -> "Rust function completed successfully"
+                            104 -> "Rust function returned error"
+                            110 -> "Rust decryption started"
+                            111 -> "Rust decryption header parsed"
+                            112 -> "Rust decryption key derived"
+                            113 -> "Rust decryption double decrypt"
+                            114 -> "Rust decryption file write"
+                            else -> "Unknown status code: $result"
                         }
                         throw IllegalStateException(errorMessage)
                     }
+                    
+                    android.util.Log.d("FileEncryption", "!!! DECRYPTION SUCCESS !!!")
                     
                     val elapsedTime = System.currentTimeMillis() - startTime
                     val elapsedSeconds = elapsedTime / 1000.0
@@ -648,8 +665,10 @@ class FileEncryptionActivity : AppCompatActivity() { // UI for selecting files a
                         clearPendingState()
                     }
                 } finally {
+                    android.util.Log.d("FileEncryption", "Closing file descriptors")
                     inputFd.close()
                     outputFd.close()
+                    android.util.Log.d("FileEncryption", "=== DECRYPTION END ===")
                 }
                 
             } catch (e: Exception) {
@@ -718,7 +737,7 @@ class FileEncryptionActivity : AppCompatActivity() { // UI for selecting files a
                 // Open file descriptors for streaming
                 val inputFd = contentResolver.openFileDescriptor(selectedFileUri!!, "r")
                     ?: throw IllegalStateException("Failed to open input file")
-                val outputFd = contentResolver.openFileDescriptor(outputUri, "w")
+                val outputFd = contentResolver.openFileDescriptor(outputUri, "rw")
                     ?: throw IllegalStateException("Failed to open output file")
                 
                 try {
@@ -730,10 +749,36 @@ class FileEncryptionActivity : AppCompatActivity() { // UI for selecting files a
                     }
                     
                     // Call streaming encryption
-                    val result = RustyCrypto.tripleEncryptFd(secret, isUsingKeyFile, inputFd.fd, outputFd.fd)
+                    val result = RustyCrypto.doubleEncryptFd(secret, isUsingKeyFile, inputFd.fd, outputFd.fd)
                     
-                    if (result != 0) {
-                        throw IllegalStateException("Encryption failed with code: $result")
+                    android.util.Log.d("FileEncryption", "doubleEncryptFd returned status code: $result")
+                    
+                    if (result != 103) {  // 103 = STATUS_RUST_SUCCESS
+                        val errorMessage = when (result) {
+                            -1 -> "Invalid input parameters"
+                            -3 -> "KEY DERIVATION FAILED - Argon2 error in Rust crypto layer"
+                            -4 -> "Encryption operation failed"
+                            -6 -> "IO error or other failure"
+                            100 -> "Reached C function entry"
+                            101 -> "Passed input validation"
+                            102 -> "About to call Rust function"
+                            103 -> "Rust function completed successfully"
+                            104 -> "Rust function returned error"
+                            105 -> "Rust encryption started"
+                            106 -> "Rust encryption key derived"
+                            107 -> "Rust encryption file read"
+                            108 -> "Rust encryption double encrypt"
+                            109 -> "Rust encryption header write"
+                            else -> "Unknown status code: $result"
+                        }
+                        // Delete partial output file on failure
+                        try {
+                            contentResolver.delete(outputUri, null, null)
+                            android.util.Log.d("FileEncryption", "Deleted partial output file after failure (same location)")
+                        } catch (deleteEx: Exception) {
+                            android.util.Log.e("FileEncryption", "Failed to delete partial output (same location): ${deleteEx.message}")
+                        }
+                        throw IllegalStateException("Encryption failed with status code $result: $errorMessage")
                     }
                     
                     val elapsedTime = System.currentTimeMillis() - startTime
@@ -752,13 +797,7 @@ class FileEncryptionActivity : AppCompatActivity() { // UI for selecting files a
                 
             } catch (e: Exception) {
                 withContext(Dispatchers.Main) {
-                    val errorMessage = if (e.message?.contains("Authentication/decryption failed") == true || 
-                                           e.message?.contains("tampering") == true) {
-                        e.message
-                    } else {
-                        "Could not save to same location. ${e.message}"
-                    }
-                    Toast.makeText(this@FileEncryptionActivity, errorMessage, Toast.LENGTH_LONG).show()
+                    Toast.makeText(this@FileEncryptionActivity, "Saving to selected folder instead...", Toast.LENGTH_SHORT).show()
                     // Fallback to folder picker
                     if (pickedFolderUri != null) {
                         saveEncryptedToPickedFolder()
@@ -775,15 +814,26 @@ class FileEncryptionActivity : AppCompatActivity() { // UI for selecting files a
             try {
                 val secret = pendingDecryptionSecret ?: return@launch
                 
+                android.util.Log.d("FileEncryption", "=== DECRYPTION START (same location) ===")
+                android.util.Log.d("FileEncryption", "Secret size: ${secret.size}, isKeyFile: $isUsingKeyFile")
+                android.util.Log.d("FileEncryption", "Parent URI: $parentUri, fileName: $fileName")
+                
                 // Create output file in same directory as input
                 val outputUri = createFileInFolder(parentUri, fileName)
                     ?: throw IllegalStateException("Failed to create output file in same directory")
                 
+                android.util.Log.d("FileEncryption", "Output file created: $outputUri")
+                
                 // Open file descriptors for streaming
+                android.util.Log.d("FileEncryption", "Opening input file: $selectedFileUri")
                 val inputFd = contentResolver.openFileDescriptor(selectedFileUri!!, "r")
                     ?: throw IllegalStateException("Failed to open input file")
-                val outputFd = contentResolver.openFileDescriptor(outputUri, "w")
+                android.util.Log.d("FileEncryption", "Input FD: ${inputFd.fd}, stat size: ${inputFd.statSize}")
+                
+                android.util.Log.d("FileEncryption", "Opening output file for write")
+                val outputFd = contentResolver.openFileDescriptor(outputUri, "rw")
                     ?: throw IllegalStateException("Failed to open output file")
+                android.util.Log.d("FileEncryption", "Output FD: ${outputFd.fd}")
                 
                 try {
                     val startTime = System.currentTimeMillis()
@@ -793,22 +843,45 @@ class FileEncryptionActivity : AppCompatActivity() { // UI for selecting files a
                         binding.tvOutputPath.text = "Started processing your file, please wait...."
                     }
                     
+                    android.util.Log.d("FileEncryption", "Calling RustyCrypto.doubleDecryptFd()")
+                    
                     // Call streaming decryption
-                    val result = RustyCrypto.tripleDecryptFd(secret, isUsingKeyFile, inputFd.fd, outputFd.fd)
-                    if (result != 0) {
+                    val result = RustyCrypto.doubleDecryptFd(secret, isUsingKeyFile, inputFd.fd, outputFd.fd)
+                    
+                    android.util.Log.d("FileEncryption", "doubleDecryptFd returned status code: $result")
+                    
+                    if (result != 103) {  // 103 = STATUS_RUST_SUCCESS
+                        android.util.Log.e("FileEncryption", "!!! DECRYPTION FAILED with error code: $result !!!")
                         // Delete partial output on failure
                         try {
                             contentResolver.delete(outputUri, null, null)
+                            android.util.Log.d("FileEncryption", "Deleted partial output file")
                         } catch (deleteEx: Exception) {
+                            android.util.Log.e("FileEncryption", "Failed to delete partial: ${deleteEx.message}")
                         }
                         val errorMessage = when (result) {
-                            RustyCrypto.CRYPTO_ERROR_DECRYPTION_FAILED -> "Authentication/decryption failed. This may be due to file corruption, tampering, or wrong password/key file."
-                            RustyCrypto.CRYPTO_ERROR_INVALID_INPUT -> "Invalid input file. The file may be corrupted or not a valid encrypted file."
-                            RustyCrypto.CRYPTO_ERROR_NULL_POINTER -> "File access error. Please check file permissions."
-                            else -> "Decryption failed with error code: $result. This may be due to file corruption, tampering, or wrong password/key file."
+                            -1 -> "Invalid input parameters"
+                            -2 -> "Invalid input file format"
+                            -3 -> "KEY DERIVATION FAILED - Argon2 error in Rust crypto layer"
+                            -4 -> "Encryption operation failed"
+                            -5 -> "Authentication/decryption failed"
+                            -6 -> "IO error or other failure"
+                            100 -> "Reached C function entry"
+                            101 -> "Passed input validation"
+                            102 -> "About to call Rust function"
+                            103 -> "Rust function completed successfully"
+                            104 -> "Rust function returned error"
+                            110 -> "Rust decryption started"
+                            111 -> "Rust decryption header parsed"
+                            112 -> "Rust decryption key derived"
+                            113 -> "Rust decryption double decrypt"
+                            114 -> "Rust decryption file write"
+                            else -> "Unknown status code: $result"
                         }
                         throw IllegalStateException(errorMessage)
                     }
+                    
+                    android.util.Log.d("FileEncryption", "!!! DECRYPTION SUCCESS !!!")
                     
                     val elapsedTime = System.currentTimeMillis() - startTime
                     val elapsedSeconds = elapsedTime / 1000.0
@@ -826,18 +899,24 @@ class FileEncryptionActivity : AppCompatActivity() { // UI for selecting files a
                 
             } catch (e: Exception) {
                 withContext(Dispatchers.Main) {
-                    val errorMessage = if (e.message?.contains("Authentication/decryption failed") == true || 
+                    val errorMessage = if (e.message?.contains("Authentication/decryption failed") == true ||
                                            e.message?.contains("tampering") == true) {
-                        e.message
+                        e.message!!
                     } else {
-                        "Could not save to same location. ${e.message}"
+                        null
                     }
-                    Toast.makeText(this@FileEncryptionActivity, errorMessage, Toast.LENGTH_LONG).show()
-                    // Fallback to folder picker
-                    if (pickedFolderUri != null) {
-                        saveDecryptedToPickedFolder()
+                    
+                    if (errorMessage != null) {
+                        // Decryption/auth error - don't retry
+                        Toast.makeText(this@FileEncryptionActivity, errorMessage, Toast.LENGTH_LONG).show()
                     } else {
-                        launchPickFolderForDecryption()
+                        // Permission/folder error - fallback to folder picker
+                        Toast.makeText(this@FileEncryptionActivity, "Saving to selected folder instead...", Toast.LENGTH_SHORT).show()
+                        if (pickedFolderUri != null) {
+                            saveDecryptedToPickedFolder()
+                        } else {
+                            launchPickFolderForDecryption()
+                        }
                     }
                 }
             }
@@ -925,16 +1004,16 @@ class FileEncryptionActivity : AppCompatActivity() { // UI for selecting files a
             if (copyCount == 1) {
                 "${nameWithoutExt}_copy$extension"
             } else {
-                // For multiple copies, keep appending _copy
-                "${nameWithoutExt}" + "_copy".repeat(copyCount) + "$extension"
+                // For multiple copies, use _copy2, _copy3, etc.
+                "${nameWithoutExt}_copy${copyCount}$extension"
             }
         } else {
             // No extension
             if (copyCount == 1) {
                 "${originalName}_copy"
             } else {
-                // For multiple copies, keep appending _copy
-                "${originalName}" + "_copy".repeat(copyCount)
+                // For multiple copies, use _copy2, _copy3, etc.
+                "${originalName}_copy${copyCount}"
             }
         }
     }
@@ -1130,7 +1209,7 @@ class FileEncryptionActivity : AppCompatActivity() { // UI for selecting files a
         }
     }
 
-    private data class Header(val originalLength: Int, val numChunks: Int, val binaryStart: Int, val salt: ByteArray?)
+    private data class Header(val originalLength: Int, val aesNonce: ByteArray, val chachaNonce: ByteArray, val binaryStart: Int, val salt: ByteArray?)
 
     private fun parseHeader(bytes: ByteArray): Header {
 
@@ -1151,15 +1230,25 @@ class FileEncryptionActivity : AppCompatActivity() { // UI for selecting files a
             throw IllegalArgumentException("Not a valid PQrypt encrypted file (missing PQRYPT header)")
         }
 
-        val lenLine = readLine()
-        val chunksLine = readLine()
-        if (!lenLine.all { it.isDigit() } || !chunksLine.all { it.isDigit() }) {
-            throw IllegalArgumentException("Not a valid PQrypt encrypted file (invalid header numbers)")
+        val lengthLine = readLine()
+        val aesNonceLine = readLine()
+        val chachaNonceLine = readLine()
+
+        if (!lengthLine.all { it.isDigit() }) {
+            throw IllegalArgumentException("Not a valid PQrypt encrypted file (invalid length)")
         }
 
-        val originalLength = lenLine.toInt()
-        val numChunks = chunksLine.toInt()
-        return Header(originalLength, numChunks, index, null)
+        val originalLength = lengthLine.toInt()
+
+        // Decode hex nonces
+        val aesNonce = aesNonceLine.chunked(2).map { it.toInt(16).toByte() }.toByteArray()
+        val chachaNonce = chachaNonceLine.chunked(2).map { it.toInt(16).toByte() }.toByteArray()
+
+        if (aesNonce.size != 12 || chachaNonce.size != 12) {
+            throw IllegalArgumentException("Not a valid PQrypt encrypted file (invalid nonce sizes)")
+        }
+
+        return Header(originalLength, aesNonce, chachaNonce, index, null)
     }
 
     // HKDF-Extract(salt, IKM) using HMAC-SHA256

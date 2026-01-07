@@ -22,8 +22,8 @@ extern "C" {
 #define CRYPTO_ERROR_FORMAT -11
 #define CRYPTO_ERROR_UNSUPPORTED -12
 
-// Unified 128-byte password derivation
-int derive_password_hash_unified_128_c(
+// Unified 64-byte password derivation (UPDATED)
+int derive_password_hash_unified_64_c(
     const unsigned char* app_name,
     size_t app_name_len,
     const unsigned char* app_password,
@@ -34,9 +34,9 @@ int derive_password_hash_unified_128_c(
     size_t out_len
 );
 
-// Generate password from already-derived 128-byte hash
+// Generate password from already-derived hash
 int generate_password_from_hash_c(
-    const unsigned char* hash_128,
+    const unsigned char* hash_64,  // UPDATED: now 64 bytes
     size_t hash_len,
     size_t desired_len,
     unsigned int enabled_sets_mask,
@@ -44,53 +44,60 @@ int generate_password_from_hash_c(
     size_t* output_len
 );
 
-// PQC 4-Algorithm Hybrid Key Exchange Functions
-int pqc_4hybrid_init_c(
-    unsigned char* hybrid_1_key,
-    size_t* hybrid_1_key_len,
-    unsigned char* sender_state,
-    size_t* sender_state_len
+// Hybrid Key Exchange Functions (UPDATED - 3 functions instead of 4)
+int hybrid_sender_init_c(
+    unsigned char* package1,
+    size_t* package1_len
 );
 
-int pqc_4hybrid_recv_c(
-    const unsigned char* hybrid_1_key,
-    size_t hybrid_1_key_len,
-    unsigned char* hybrid_2_key,
-    size_t* hybrid_2_key_len,
-    unsigned char* receiver_state,
-    size_t* receiver_state_len
+int hybrid_receiver_c(
+    const unsigned char* package1,
+    size_t package1_len,
+    unsigned char* derived_hash,
+    unsigned char* package2,
+    size_t* package2_len
 );
 
-int pqc_4hybrid_snd_final_c(
-    const unsigned char* hybrid_2_key,
-    size_t hybrid_2_key_len,
-    const unsigned char* sender_state,
-    size_t sender_state_len,
-    unsigned char* final_key,
-    unsigned char* hybrid_3_key,
-    size_t* hybrid_3_key_len
+int hybrid_sender_final_c(
+    const unsigned char* package2,
+    size_t package2_len,
+    unsigned char* derived_hash
 );
 
-int pqc_4hybrid_recv_final_c(
-    const unsigned char* hybrid_3_key,
-    size_t hybrid_3_key_len,
-    const unsigned char* receiver_state,
-    size_t receiver_state_len,
-    unsigned char* final_key
+// Dual mutual exchange
+int hybrid_receiver_dual_c(
+    const unsigned char* package1,
+    size_t package1_len,
+    unsigned char* package2_bundle,
+    size_t* package2_bundle_len
 );
 
-// New: FD-based file encryption/decryption (PQRYPT2, streaming)
-int triple_encrypt_fd_c(
+int hybrid_sender_third_c(
+    const unsigned char* package2_bundle,
+    size_t package2_bundle_len,
+    unsigned char* package3_out,
+    size_t* package3_out_len,
+    unsigned char* final_hash_out
+);
+
+int hybrid_receiver_final_dual_c(
+    const unsigned char* package3,
+    size_t package3_len,
+    unsigned char* final_hash_out
+);
+
+// New: Double encryption (ChaCha20 + AES-GCM) (UPDATED)
+int double_encrypt_fd_c(
     const unsigned char* secret,
-    unsigned long secret_len,  
+    unsigned long secret_len,
     int is_keyfile,
     int in_fd,
     int out_fd
 );
 
-int triple_decrypt_fd_c(
+int double_decrypt_fd_c(
     const unsigned char* secret,
-    unsigned long secret_len,  
+    unsigned long secret_len,
     int is_keyfile,
     int in_fd,
     int out_fd

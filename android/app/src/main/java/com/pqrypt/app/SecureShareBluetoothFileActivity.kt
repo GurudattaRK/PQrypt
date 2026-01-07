@@ -283,7 +283,7 @@ class SecureShareBluetoothFileActivity : AppCompatActivity() {
 
         lifecycleScope.launch(Dispatchers.IO) {
             try {
-                val result = RustyCrypto.pqc4HybridInit()
+                val result = RustyCrypto.hybridSenderInit()
                 if (result != null && result.isNotEmpty()) {
                     // Store sender state for later use
                     // Implementation would store state from hybrid init
@@ -521,24 +521,17 @@ class SecureShareBluetoothFileActivity : AppCompatActivity() {
             binding.progressBar.progress = 10
         }
 
-        // Step 1: Send initial key
-        val initResult = RustyCrypto.pqc4HybridInit()
-        senderState = initResult[1]
-        val initialKey = initResult[0] as ByteArray
-        sendBluetoothData(initialKey)
+        // Step 1: Send initial key (package1)
+        val package1 = RustyCrypto.hybridSenderInit()
+        sendBluetoothData(package1)
         
         withContext(Dispatchers.Main) {
             binding.progressBar.progress = 30
         }
 
-        // Step 2: Receive response key
-        val responseKey = receiveBluetoothData()
-        val finalResult = RustyCrypto.pqc4HybridSndFinal(responseKey, senderState as ByteArray)
-        
-        // Step 3: Send final key
-        val finalKey = finalResult[1] as ByteArray
-        sendBluetoothData(finalKey)
-        finalSharedSecret = finalResult[0] as ByteArray
+        // Step 2: Receive response key (package2) and derive final key
+        val package2 = receiveBluetoothData()
+        finalSharedSecret = RustyCrypto.hybridSenderFinal(package2)
         
         withContext(Dispatchers.Main) {
             binding.progressBar.progress = 60
@@ -569,22 +562,18 @@ class SecureShareBluetoothFileActivity : AppCompatActivity() {
             binding.progressBar.progress = 10
         }
 
-        // Step 1: Receive initial key
-        val initialKey = receiveBluetoothData()
-        val recvResult = RustyCrypto.pqc4HybridRecv(initialKey)
+        // Step 1: Receive initial key (package1)
+        val package1 = receiveBluetoothData()
+        val recvResult = RustyCrypto.hybridReceiver(package1)
         
-        // Step 2: Send response key
-        val responseKey = recvResult[0] as ByteArray
-        receiverState = recvResult[1]
-        sendBluetoothData(responseKey)
+        // Step 2: Send response key (package2) and get final key
+        val package2 = recvResult[0] as ByteArray
+        finalSharedSecret = recvResult[1] as ByteArray
+        sendBluetoothData(package2)
         
         withContext(Dispatchers.Main) {
             binding.progressBar.progress = 40
         }
-
-        // Step 3: Receive final key and generate shared secret
-        val finalKey = receiveBluetoothData()
-        finalSharedSecret = RustyCrypto.pqc4HybridRecvFinal(finalKey, receiverState as ByteArray)
         
         withContext(Dispatchers.Main) {
             binding.progressBar.progress = 60
@@ -736,7 +725,7 @@ class SecureShareBluetoothFileActivity : AppCompatActivity() {
             val outputFd = ParcelFileDescriptor.open(File(outputPath), ParcelFileDescriptor.MODE_CREATE or ParcelFileDescriptor.MODE_WRITE_ONLY)
             
             try {
-                val result = RustyCrypto.tripleEncryptFd(finalSharedSecret!!, false, inputFd.fd, outputFd.fd)
+                val result = RustyCrypto.doubleEncryptFd(finalSharedSecret!!, false, inputFd.fd, outputFd.fd)
                 if (result != 0) throw Exception("Encryption failed")
                 File(outputPath).readBytes()
             } finally {
@@ -771,7 +760,7 @@ class SecureShareBluetoothFileActivity : AppCompatActivity() {
             val outputFd = ParcelFileDescriptor.open(decryptedFile, ParcelFileDescriptor.MODE_CREATE or ParcelFileDescriptor.MODE_WRITE_ONLY)
             
             try {
-                val result = RustyCrypto.tripleDecryptFd(finalSharedSecret!!, false, inputFd.fd, outputFd.fd)
+                val result = RustyCrypto.doubleDecryptFd(finalSharedSecret!!, false, inputFd.fd, outputFd.fd)
                 if (result != 0) throw Exception("Decryption failed")
                 // File decrypted successfully - return full path
                 decryptedFile.absolutePath

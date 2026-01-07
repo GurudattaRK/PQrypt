@@ -1,13 +1,9 @@
 #include <jni.h>
 #include <android/log.h>
 #include <cstring>
+#include <vector>
 #include "c_ffi.h"
 
-
-#define ARGON2_SALT_SIZE 32
-#define KYBER_PUBLICKEYBYTES 1568
-#define KYBER_SECRETKEYBYTES 3168
-#define X448_KEY_SIZE 56
 
 static JavaVM* g_jvm = nullptr;
 
@@ -19,7 +15,7 @@ JNI_OnLoad(JavaVM* vm, void* reserved) {
 
 
 extern "C" JNIEXPORT jint JNICALL
-Java_com_pqrypt_app_RustyCrypto_tripleEncryptFd(JNIEnv *env, jclass, jbyteArray secret, jboolean isKeyFile, jint inFd, jint outFd) {
+Java_com_pqrypt_app_RustyCrypto_doubleEncryptFd(JNIEnv *env, jclass, jbyteArray secret, jboolean isKeyFile, jint inFd, jint outFd) {
     if (!secret || inFd < 0 || outFd < 0) {
         return CRYPTO_ERROR_INVALID_INPUT;
     }
@@ -33,11 +29,12 @@ Java_com_pqrypt_app_RustyCrypto_tripleEncryptFd(JNIEnv *env, jclass, jbyteArray 
     // Copy to native buffer
     uint8_t* secretCopy = new uint8_t[secretLen];
     memcpy(secretCopy, secretBytes, secretLen);
-    // Zero Java array in-place and commit
-    memset(secretBytes, 0, secretLen);
-    env->ReleaseByteArrayElements(secret, secretBytes, 0);
+    
+    // Do not modify the Java array in-place; release without committing native changes
+    env->ReleaseByteArrayElements(secret, secretBytes, JNI_ABORT);
 
-    int res = triple_encrypt_fd_c(secretCopy, (unsigned long)secretLen, isKeyFile ? 1 : 0, (int)inFd, (int)outFd);
+    int res = double_encrypt_fd_c(secretCopy, (unsigned long)secretLen, isKeyFile ? 1 : 0, (int)inFd, (int)outFd);
+    
     // Zero and free native buffer
     memset(secretCopy, 0, secretLen);
     delete [] secretCopy;
@@ -45,7 +42,7 @@ Java_com_pqrypt_app_RustyCrypto_tripleEncryptFd(JNIEnv *env, jclass, jbyteArray 
 }
 
 extern "C" JNIEXPORT jint JNICALL
-Java_com_pqrypt_app_RustyCrypto_tripleDecryptFd(JNIEnv *env, jclass, jbyteArray secret, jboolean isKeyFile, jint inFd, jint outFd) {
+Java_com_pqrypt_app_RustyCrypto_doubleDecryptFd(JNIEnv *env, jclass, jbyteArray secret, jboolean isKeyFile, jint inFd, jint outFd) {
     if (!secret || inFd < 0 || outFd < 0) return CRYPTO_ERROR_INVALID_INPUT;
 
     jsize secretLen = env->GetArrayLength(secret);
@@ -57,11 +54,12 @@ Java_com_pqrypt_app_RustyCrypto_tripleDecryptFd(JNIEnv *env, jclass, jbyteArray 
     // Copy to native buffer
     uint8_t* secretCopy = new uint8_t[secretLen];
     memcpy(secretCopy, secretBytes, secretLen);
-    // Zero Java array in-place and commit
-    memset(secretBytes, 0, secretLen);
-    env->ReleaseByteArrayElements(secret, secretBytes, 0);
+    
+    // Do not modify the Java array in-place; release without committing native changes
+    env->ReleaseByteArrayElements(secret, secretBytes, JNI_ABORT);
 
-    int res = triple_decrypt_fd_c(secretCopy, (size_t)secretLen, isKeyFile ? 1 : 0, (int)inFd, (int)outFd);
+    int res = double_decrypt_fd_c(secretCopy, (size_t)secretLen, isKeyFile ? 1 : 0, (int)inFd, (int)outFd);
+    
     // Zero and free native buffer
     memset(secretCopy, 0, secretLen);
     delete [] secretCopy;
@@ -70,24 +68,24 @@ Java_com_pqrypt_app_RustyCrypto_tripleDecryptFd(JNIEnv *env, jclass, jbyteArray 
 
 
 extern "C" JNIEXPORT jstring JNICALL
-Java_com_pqrypt_app_RustyCrypto_generatePasswordFromHash(JNIEnv *env, jclass, jbyteArray hash128, jint desiredLen, jint enabledSetsMask) {
-    if (!hash128 || desiredLen <= 0) return nullptr;
+Java_com_pqrypt_app_RustyCrypto_generatePasswordFromHash(JNIEnv *env, jclass, jbyteArray hash64, jint desiredLen, jint enabledSetsMask) {
+    if (!hash64 || desiredLen <= 0) return nullptr;
 
-    jsize hashLen = env->GetArrayLength(hash128);
-    if (hashLen != 128) return nullptr;
+    jsize hashLen = env->GetArrayLength(hash64);
+    if (hashLen != 64) return nullptr;
 
-    jbyte* hashBytes = env->GetByteArrayElements(hash128, nullptr);
+    jbyte* hashBytes = env->GetByteArrayElements(hash64, nullptr);
     if (!hashBytes) return nullptr;
 
     char outBuf[257];
     size_t outLen = 0;
     int res = generate_password_from_hash_c(
-        reinterpret_cast<const unsigned char*>(hashBytes), 128,
+        reinterpret_cast<const unsigned char*>(hashBytes), 64,
         (size_t)desiredLen, (unsigned int)enabledSetsMask,
         outBuf, &outLen);
 
     memset(hashBytes, 0, hashLen);
-    env->ReleaseByteArrayElements(hash128, hashBytes, 0);
+    env->ReleaseByteArrayElements(hash64, hashBytes, 0);
 
     if (res != CRYPTO_SUCCESS) return nullptr;
     return env->NewStringUTF(outBuf);
@@ -141,7 +139,7 @@ static jbyteArray bytesToJbyteArray(JNIEnv *env, const uint8_t *bytes, jsize len
 }
 
 extern "C" JNIEXPORT jbyteArray JNICALL
-Java_com_pqrypt_app_RustyCrypto_derivePasswordHashUnified128(JNIEnv *env, jclass clazz, jbyteArray appName, jbyteArray appPassword, jbyteArray masterPassword) {
+Java_com_pqrypt_app_RustyCrypto_derivePasswordHashUnified64(JNIEnv *env, jclass clazz, jbyteArray appName, jbyteArray appPassword, jbyteArray masterPassword) {
     if (!appName || !masterPassword) {
         return nullptr;
     }
@@ -158,9 +156,9 @@ Java_com_pqrypt_app_RustyCrypto_derivePasswordHashUnified128(JNIEnv *env, jclass
         return nullptr;
     }
 
-    uint8_t out[128];
-    size_t out_len = 128;
-    int res = derive_password_hash_unified_128_c(appBytes, appLen,
+    uint8_t out[64];
+    size_t out_len = 64;
+    int res = derive_password_hash_unified_64_c(appBytes, appLen,
                                                  pwdBytes, pwdLen,
                                                  masterBytes, masterLen,
                                                  out, out_len);
@@ -173,201 +171,157 @@ Java_com_pqrypt_app_RustyCrypto_derivePasswordHashUnified128(JNIEnv *env, jclass
         return nullptr;
     }
 
-    return bytesToJbyteArray(env, out, 128);
+    return bytesToJbyteArray(env, out, 64);
 }
+
+// argon2Hash JNI bridge removed: KDF is handled internally in Rust.
+
 
 extern "C" JNIEXPORT jbyteArray JNICALL
-Java_com_pqrypt_app_RustyCrypto_argon2Hash(JNIEnv *env, jclass clazz, jbyteArray password, jbyteArray salt, jint outputLength) {
-    jsize passwordLen;
-    uint8_t *passwordBytes = jbyteArrayToBytes(env, password, &passwordLen);
-    
-    if (!passwordBytes) {
-        return nullptr;
-    }
-    
-    jsize outLen = outputLength > 0 ? outputLength : 32;
-    uint8_t *hashBuf = new uint8_t[outLen];
-    
-    int result = derive_password_hash_unified_128_c(
-        (const unsigned char*)"", 0,
-        (const unsigned char*)"", 0,
-        passwordBytes, passwordLen,
-        hashBuf, outLen
-    );
-    
-    delete[] passwordBytes;
-    
-    if (result != CRYPTO_SUCCESS) {
-        delete[] hashBuf;
-        return nullptr;
-    }
-    
-    jbyteArray resultArray = bytesToJbyteArray(env, hashBuf, outLen);
-    delete[] hashBuf;
-    return resultArray;
-}
+Java_com_pqrypt_app_RustyCrypto_hybridSenderInit(JNIEnv *env, jclass clazz) {
+    // PACKAGE1_SIZE = SLHDSA_SIGNATURE_SIZE + (MLKEM1024_PUBLIC_SIZE + X448_PUBLIC_SIZE + HQC256_PUBLIC_SIZE + P521_PUBLIC_SIZE) + SLHDSA_PUBLIC_SIZE
+    const size_t PACKAGE1_SIZE = 49856 + (1568 + 56 + 7245 + 133) + 64;
+    std::vector<uint8_t> package1(PACKAGE1_SIZE);
+    size_t package1Len = 0;
 
+    int status = hybrid_sender_init_c(package1.data(), &package1Len);
 
-extern "C" JNIEXPORT jobjectArray JNICALL
-Java_com_pqrypt_app_RustyCrypto_pqc4HybridInit(JNIEnv *env, jclass clazz) {
-    uint8_t hybrid1Key[131072];
-    size_t hybrid1KeyLen = 0;
-    uint8_t senderState[65536];
-    size_t senderStateLen = 0;
-    
-    int status = pqc_4hybrid_init_c(hybrid1Key, &hybrid1KeyLen, senderState, &senderStateLen);
-    
     if (status != CRYPTO_SUCCESS) {
         return nullptr;
     }
-    
-    jclass byteArrayClass = env->FindClass("[B");
-    if (!byteArrayClass) {
-        return nullptr;
-    }
-    
-    jobjectArray resultArray = env->NewObjectArray(2, byteArrayClass, nullptr);
-    if (!resultArray) {
-        return nullptr;
-    }
-    
-    jbyteArray j_hybrid1Key = bytesToJbyteArray(env, hybrid1Key, (jsize)hybrid1KeyLen);
-    jbyteArray j_senderState = bytesToJbyteArray(env, senderState, (jsize)senderStateLen);
-    
-    if (!j_hybrid1Key || !j_senderState) {
-        return nullptr;
-    }
-    
-    env->SetObjectArrayElement(resultArray, 0, j_hybrid1Key);
-    env->SetObjectArrayElement(resultArray, 1, j_senderState);
-    
-    env->DeleteLocalRef(j_hybrid1Key);
-    env->DeleteLocalRef(j_senderState);
-    
-    return resultArray;
+
+    return bytesToJbyteArray(env, package1.data(), (jsize)package1Len);
 }
 
 extern "C" JNIEXPORT jobjectArray JNICALL
-Java_com_pqrypt_app_RustyCrypto_pqc4HybridRecv(JNIEnv *env, jclass clazz, jbyteArray hybrid1Key) {
-    jsize hybrid1KeyLen;
-    uint8_t *hybrid1KeyBytes = jbyteArrayToBytes(env, hybrid1Key, &hybrid1KeyLen);
-    
-    if (!hybrid1KeyBytes) {
-        return nullptr;
-    }
-    
-    uint8_t hybrid2Key[131072];
-    size_t hybrid2KeyLen = 0;
-    uint8_t receiverState[65536];
-    size_t receiverStateLen = 0;
-    
-    int result = pqc_4hybrid_recv_c(hybrid1KeyBytes, hybrid1KeyLen, hybrid2Key, &hybrid2KeyLen, receiverState, &receiverStateLen);
-    
-    delete[] hybrid1KeyBytes;
-    
-    if (result != CRYPTO_SUCCESS) {
-        return nullptr;
-    }
-    
-    jclass byteArrayClass = env->FindClass("[B");
-    if (!byteArrayClass) {
-        return nullptr;
-    }
-    
-    jobjectArray resultArray = env->NewObjectArray(2, byteArrayClass, nullptr);
-    if (!resultArray) {
-        return nullptr;
-    }
-    
-    jbyteArray j_hybrid2Key = bytesToJbyteArray(env, hybrid2Key, (jsize)hybrid2KeyLen);
-    jbyteArray j_receiverState = bytesToJbyteArray(env, receiverState, (jsize)receiverStateLen);
-    
-    if (!j_hybrid2Key || !j_receiverState) {
-        return nullptr;
-    }
-    
-    env->SetObjectArrayElement(resultArray, 0, j_hybrid2Key);
-    env->SetObjectArrayElement(resultArray, 1, j_receiverState);
-    
-    env->DeleteLocalRef(j_hybrid2Key);
-    env->DeleteLocalRef(j_receiverState);
-    
-    return resultArray;
-}
+Java_com_pqrypt_app_RustyCrypto_hybridReceiver(JNIEnv *env, jclass clazz, jbyteArray package1) {
+    jsize package1Len;
+    uint8_t *package1Bytes = jbyteArrayToBytes(env, package1, &package1Len);
 
-extern "C" JNIEXPORT jobjectArray JNICALL
-Java_com_pqrypt_app_RustyCrypto_pqc4HybridSndFinal(JNIEnv *env, jclass clazz, jbyteArray hybrid2Key, jbyteArray senderState) {
-    jsize hybrid2KeyLen, senderStateLen;
-    uint8_t *hybrid2KeyBytes = jbyteArrayToBytes(env, hybrid2Key, &hybrid2KeyLen);
-    uint8_t *senderStateBytes = jbyteArrayToBytes(env, senderState, &senderStateLen);
-    
-    if (!hybrid2KeyBytes || !senderStateBytes) {
-        delete[] hybrid2KeyBytes;
-        delete[] senderStateBytes;
+    if (!package1Bytes) {
         return nullptr;
     }
-    
-    uint8_t finalKey[128];
-    uint8_t hybrid3Key[131072];
-    size_t hybrid3KeyLen = 0;
-    
-    int result = pqc_4hybrid_snd_final_c(hybrid2KeyBytes, hybrid2KeyLen, senderStateBytes, senderStateLen, finalKey, hybrid3Key, &hybrid3KeyLen);
-    
-    delete[] hybrid2KeyBytes;
-    delete[] senderStateBytes;
-    
+
+    uint8_t derivedHash[64];
+    // PACKAGE2_SIZE = SLHDSA_SIGNATURE_SIZE + (MLKEM1024_CIPHERTEXT_SIZE + X448_PUBLIC_SIZE + HQC256_CIPHERTEXT_SIZE + P521_PUBLIC_SIZE) + SLHDSA_PUBLIC_SIZE
+    const size_t PACKAGE2_SIZE = 49856 + (1568 + 56 + 14421 + 133) + 64;
+    std::vector<uint8_t> package2(PACKAGE2_SIZE);
+    size_t package2Len = 0;
+
+    int result = hybrid_receiver_c(package1Bytes, package1Len, derivedHash, package2.data(), &package2Len);
+
+    delete[] package1Bytes;
+
     if (result != CRYPTO_SUCCESS) {
         return nullptr;
     }
-    
+
+    // Return combined result: derivedHash + package2
     jclass byteArrayClass = env->FindClass("[B");
     if (!byteArrayClass) {
         return nullptr;
     }
-    
+
     jobjectArray resultArray = env->NewObjectArray(2, byteArrayClass, nullptr);
     if (!resultArray) {
         return nullptr;
     }
-    
-    jbyteArray j_finalKey = bytesToJbyteArray(env, finalKey, 128);
-    jbyteArray j_hybrid3Key = bytesToJbyteArray(env, hybrid3Key, (jsize)hybrid3KeyLen);
-    
-    if (!j_finalKey || !j_hybrid3Key) {
+
+    jbyteArray j_derivedHash = bytesToJbyteArray(env, derivedHash, 64);
+    jbyteArray j_package2 = bytesToJbyteArray(env, package2.data(), (jsize)package2Len);
+
+    if (!j_derivedHash || !j_package2) {
         return nullptr;
     }
-    
-    env->SetObjectArrayElement(resultArray, 0, j_finalKey);
-    env->SetObjectArrayElement(resultArray, 1, j_hybrid3Key);
-    
-    env->DeleteLocalRef(j_finalKey);
-    env->DeleteLocalRef(j_hybrid3Key);
-    
+
+    env->SetObjectArrayElement(resultArray, 0, j_package2);
+    env->SetObjectArrayElement(resultArray, 1, j_derivedHash);
+
+    env->DeleteLocalRef(j_derivedHash);
+    env->DeleteLocalRef(j_package2);
+
     return resultArray;
 }
 
 extern "C" JNIEXPORT jbyteArray JNICALL
-Java_com_pqrypt_app_RustyCrypto_pqc4HybridRecvFinal(JNIEnv *env, jclass clazz, jbyteArray hybrid3Key, jbyteArray receiverState) {
-    jsize hybrid3KeyLen, receiverStateLen;
-    uint8_t *hybrid3KeyBytes = jbyteArrayToBytes(env, hybrid3Key, &hybrid3KeyLen);
-    uint8_t *receiverStateBytes = jbyteArrayToBytes(env, receiverState, &receiverStateLen);
-    
-    if (!hybrid3KeyBytes || !receiverStateBytes) {
-        delete[] hybrid3KeyBytes;
-        delete[] receiverStateBytes;
+Java_com_pqrypt_app_RustyCrypto_hybridSenderFinal(JNIEnv *env, jclass clazz, jbyteArray package2) {
+    jsize package2Len;
+    uint8_t *package2Bytes = jbyteArrayToBytes(env, package2, &package2Len);
+
+    if (!package2Bytes) {
         return nullptr;
     }
-    
-    uint8_t finalKey[128]; // 128-byte final key
-    
-    int result = pqc_4hybrid_recv_final_c(hybrid3KeyBytes, hybrid3KeyLen, receiverStateBytes, receiverStateLen, finalKey);
-    
-    delete[] hybrid3KeyBytes;
-    delete[] receiverStateBytes;
-    
+
+    uint8_t derivedHash[64];
+
+    int result = hybrid_sender_final_c(package2Bytes, package2Len, derivedHash);
+
+    delete[] package2Bytes;
+
     if (result != CRYPTO_SUCCESS) {
         return nullptr;
     }
-    
-    return bytesToJbyteArray(env, finalKey, 128);
+
+    return bytesToJbyteArray(env, derivedHash, 64);
+}
+
+// ===== Dual mutual exchange JNI wrappers =====
+extern "C" JNIEXPORT jbyteArray JNICALL
+Java_com_pqrypt_app_RustyCrypto_hybridReceiverDual(JNIEnv *env, jclass, jbyteArray package1) {
+    jsize package1Len;
+    uint8_t *package1Bytes = jbyteArrayToBytes(env, package1, &package1Len);
+    if (!package1Bytes) return nullptr;
+
+    const size_t PACKAGE1_SIZE = 49856 + (1568 + 56 + 7245 + 133) + 64;
+    const size_t PACKAGE2_SIZE = 49856 + (1568 + 56 + 14421 + 133) + 64;
+    const size_t BUNDLE_SIZE = PACKAGE2_SIZE + PACKAGE1_SIZE;
+
+    std::vector<uint8_t> bundle(BUNDLE_SIZE);
+    size_t bundleLen = 0;
+    int res = hybrid_receiver_dual_c(package1Bytes, (size_t)package1Len, bundle.data(), &bundleLen);
+    delete[] package1Bytes;
+    if (res != CRYPTO_SUCCESS) return nullptr;
+    return bytesToJbyteArray(env, bundle.data(), (jsize)bundleLen);
+}
+
+extern "C" JNIEXPORT jobjectArray JNICALL
+Java_com_pqrypt_app_RustyCrypto_hybridSenderThird(JNIEnv *env, jclass, jbyteArray package2Bundle) {
+    jsize bundleLen;
+    uint8_t *bundleBytes = jbyteArrayToBytes(env, package2Bundle, &bundleLen);
+    if (!bundleBytes) return nullptr;
+
+    const size_t PACKAGE2_SIZE = 49856 + (1568 + 56 + 14421 + 133) + 64;
+    std::vector<uint8_t> package3(PACKAGE2_SIZE);
+    size_t package3Len = 0;
+    uint8_t finalHash[64];
+
+    int res = hybrid_sender_third_c(bundleBytes, (size_t)bundleLen, package3.data(), &package3Len, finalHash);
+    delete[] bundleBytes;
+    if (res != CRYPTO_SUCCESS) return nullptr;
+
+    jclass byteArrayClass = env->FindClass("[B");
+    if (!byteArrayClass) return nullptr;
+    jobjectArray resultArray = env->NewObjectArray(2, byteArrayClass, nullptr);
+    if (!resultArray) return nullptr;
+
+    jbyteArray j_package3 = bytesToJbyteArray(env, package3.data(), (jsize)package3Len);
+    jbyteArray j_finalHash = bytesToJbyteArray(env, finalHash, 64);
+    if (!j_package3 || !j_finalHash) return nullptr;
+    env->SetObjectArrayElement(resultArray, 0, j_package3);
+    env->SetObjectArrayElement(resultArray, 1, j_finalHash);
+    env->DeleteLocalRef(j_package3);
+    env->DeleteLocalRef(j_finalHash);
+    return resultArray;
+}
+
+extern "C" JNIEXPORT jbyteArray JNICALL
+Java_com_pqrypt_app_RustyCrypto_hybridReceiverFinalDual(JNIEnv *env, jclass, jbyteArray package3) {
+    jsize p3Len;
+    uint8_t *p3Bytes = jbyteArrayToBytes(env, package3, &p3Len);
+    if (!p3Bytes) return nullptr;
+    uint8_t finalHash[64];
+    int res = hybrid_receiver_final_dual_c(p3Bytes, (size_t)p3Len, finalHash);
+    delete[] p3Bytes;
+    if (res != CRYPTO_SUCCESS) return nullptr;
+    return bytesToJbyteArray(env, finalHash, 64);
 }
