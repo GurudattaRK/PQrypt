@@ -622,7 +622,7 @@ class FileEncryptionActivity : AppCompatActivity() { // UI for selecting files a
                     
                     android.util.Log.d("FileEncryption", "doubleDecryptFd returned status code: $result")
                     
-                    if (result != 103) {  // 103 = STATUS_RUST_SUCCESS
+                    if (result != RustyCrypto.CRYPTO_SUCCESS) {
                         android.util.Log.e("FileEncryption", "!!! DECRYPTION FAILED with error code: $result !!!")
                         // Delete partial output on failure
                         try {
@@ -641,7 +641,7 @@ class FileEncryptionActivity : AppCompatActivity() { // UI for selecting files a
                             100 -> "Reached C function entry"
                             101 -> "Passed input validation"
                             102 -> "About to call Rust function"
-                            103 -> "Rust function completed successfully"
+                            RustyCrypto.CRYPTO_SUCCESS -> "Rust function completed successfully"
                             104 -> "Rust function returned error"
                             110 -> "Rust decryption started"
                             111 -> "Rust decryption header parsed"
@@ -753,7 +753,7 @@ class FileEncryptionActivity : AppCompatActivity() { // UI for selecting files a
                     
                     android.util.Log.d("FileEncryption", "doubleEncryptFd returned status code: $result")
                     
-                    if (result != 103) {  // 103 = STATUS_RUST_SUCCESS
+                    if (result != RustyCrypto.CRYPTO_SUCCESS) {
                         val errorMessage = when (result) {
                             -1 -> "Invalid input parameters"
                             -3 -> "KEY DERIVATION FAILED - Argon2 error in Rust crypto layer"
@@ -762,7 +762,7 @@ class FileEncryptionActivity : AppCompatActivity() { // UI for selecting files a
                             100 -> "Reached C function entry"
                             101 -> "Passed input validation"
                             102 -> "About to call Rust function"
-                            103 -> "Rust function completed successfully"
+                            RustyCrypto.CRYPTO_SUCCESS -> "Rust function completed successfully"
                             104 -> "Rust function returned error"
                             105 -> "Rust encryption started"
                             106 -> "Rust encryption key derived"
@@ -850,7 +850,7 @@ class FileEncryptionActivity : AppCompatActivity() { // UI for selecting files a
                     
                     android.util.Log.d("FileEncryption", "doubleDecryptFd returned status code: $result")
                     
-                    if (result != 103) {  // 103 = STATUS_RUST_SUCCESS
+                    if (result != RustyCrypto.CRYPTO_SUCCESS) {
                         android.util.Log.e("FileEncryption", "!!! DECRYPTION FAILED with error code: $result !!!")
                         // Delete partial output on failure
                         try {
@@ -869,7 +869,7 @@ class FileEncryptionActivity : AppCompatActivity() { // UI for selecting files a
                             100 -> "Reached C function entry"
                             101 -> "Passed input validation"
                             102 -> "About to call Rust function"
-                            103 -> "Rust function completed successfully"
+                            RustyCrypto.CRYPTO_SUCCESS -> "Rust function completed successfully"
                             104 -> "Rust function returned error"
                             110 -> "Rust decryption started"
                             111 -> "Rust decryption header parsed"
@@ -929,65 +929,18 @@ class FileEncryptionActivity : AppCompatActivity() { // UI for selecting files a
                 folderUri,
                 DocumentsContract.getTreeDocumentId(folderUri)
             )
-            
-            // Check if file already exists using DocumentFile to avoid system auto-renaming
-            val treeDoc = DocumentFile.fromTreeUri(this, folderUri)
-            val existingFiles = treeDoc?.listFiles()?.mapNotNull { it.name }?.toSet() ?: emptySet()
-            
-            // Generate unique filename by appending _copy if needed
-            var uniqueFileName = fileName
-            var copyCount = 0
-            
-            // Pre-check if original filename exists and start with _copy if it does
-            while (existingFiles.contains(uniqueFileName) && copyCount <= 100) {
-                copyCount++
-                uniqueFileName = generateCopyFileName(fileName, copyCount)
+            // If a file with the same name already exists, delete it to avoid _copy duplicates
+            DocumentFile.fromTreeUri(this, folderUri)?.findFile(fileName)?.let { existing ->
+                try { existing.delete() } catch (_: Exception) {}
             }
-            
-            // Now try to create the document with our pre-determined unique name
-            return try {
-                val resultUri = DocumentsContract.createDocument(
-                    contentResolver,
-                    docUri,
-                    "application/octet-stream",
-                    uniqueFileName
-                )
-                
-                if (resultUri != null) {
-                    // Verify the actual filename matches what we intended
-                    val actualName = getFileName(resultUri)
-                    if (actualName == uniqueFileName) {
-                        resultUri
-                    } else {
-                        // System still modified the name, delete and try with next _copy iteration
-                        contentResolver.delete(resultUri, null, null)
-                        
-                        // Try with next _copy iteration
-                        var nextCopyCount = copyCount + 1
-                        while (nextCopyCount <= 100) {
-                            val nextFileName = generateCopyFileName(fileName, nextCopyCount)
-                            if (!existingFiles.contains(nextFileName)) {
-                                val nextUri = DocumentsContract.createDocument(
-                                    contentResolver,
-                                    docUri,
-                                    "application/octet-stream",
-                                    nextFileName
-                                )
-                                if (nextUri != null && getFileName(nextUri) == nextFileName) {
-                                    return nextUri
-                                }
-                                nextUri?.let { contentResolver.delete(it, null, null) }
-                            }
-                            nextCopyCount++
-                        }
-                        null
-                    }
-                } else {
-                    null
-                }
-            } catch (e: Exception) {
-                null
-            }
+
+            // Create fresh output with the exact requested name
+            DocumentsContract.createDocument(
+                contentResolver,
+                docUri,
+                "application/octet-stream",
+                fileName
+            )
             
         } catch (e: Exception) {
             null
