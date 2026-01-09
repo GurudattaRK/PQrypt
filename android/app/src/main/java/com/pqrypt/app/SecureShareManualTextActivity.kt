@@ -272,6 +272,21 @@ class SecureShareManualTextActivity : AppCompatActivity() {
 
         lifecycleScope.launch(Dispatchers.IO) {
             try {
+                withContext(Dispatchers.Main) {
+                    if (pickedFolderUri == null) {
+                        binding.tvStatus.text = "Select destination folder before encryption"
+                        launchPickFolder()
+                    }
+                }
+                var attempts = 0
+                while (pickedFolderUri == null && attempts < 120) {
+                    kotlinx.coroutines.delay(1000)
+                    attempts++
+                }
+                if (pickedFolderUri == null) {
+                    withContext(Dispatchers.Main) { showError("No destination folder selected") }
+                    return@launch
+                }
                 // Create input file in cache
                 val inputFile = File.createTempFile("input_", ".txt", cacheDir)
                 inputFile.writeText(etInputText)
@@ -325,6 +340,21 @@ class SecureShareManualTextActivity : AppCompatActivity() {
 
         lifecycleScope.launch(Dispatchers.IO) {
             try {
+                withContext(Dispatchers.Main) {
+                    if (pickedFolderUri == null) {
+                        binding.tvStatus.text = "Select destination folder before decryption"
+                        launchPickFolder()
+                    }
+                }
+                var attempts = 0
+                while (pickedFolderUri == null && attempts < 120) {
+                    kotlinx.coroutines.delay(1000)
+                    attempts++
+                }
+                if (pickedFolderUri == null) {
+                    withContext(Dispatchers.Main) { showError("No destination folder selected") }
+                    return@launch
+                }
                 // Write encrypted data to temp file
                 val inputFile = File.createTempFile("encrypted_", ".tmp", cacheDir)
                 inputFile.writeBytes(encryptedData)

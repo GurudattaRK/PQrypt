@@ -30,6 +30,17 @@ import android.os.ParcelFileDescriptor
 import android.os.Environment
 import java.io.*
 import java.util.*
+import android.location.LocationManager
+import android.provider.Settings
+import androidx.appcompat.app.AlertDialog
+import android.util.Log
+import android.net.NetworkInfo
+import android.net.wifi.p2p.WifiP2pManager
+import android.net.wifi.p2p.WifiP2pDevice
+import android.net.wifi.p2p.WifiP2pConfig
+import android.net.wifi.p2p.WifiP2pInfo
+import android.net.wifi.WpsInfo
+import android.net.wifi.WifiManager
 
 class SecureShareBluetoothFileActivity : AppCompatActivity() {
 
@@ -49,12 +60,23 @@ class SecureShareBluetoothFileActivity : AppCompatActivity() {
     private var selectedDevice: BluetoothDevice? = null
     private var bluetoothSocket: BluetoothSocket? = null
     private var serverSocket: BluetoothServerSocket? = null
+    private var wifiP2pManager: WifiP2pManager? = null
+    private var wifiChannel: WifiP2pManager.Channel? = null
+    private var wifiP2pReceiver: BroadcastReceiver? = null
+    private var wifiP2pIntentFilter: IntentFilter? = null
+    private val wifiPeers = mutableListOf<WifiP2pDevice>()
+    private var isWifiDirectActive: Boolean = false
+    private var tcpServerSocket: java.net.ServerSocket? = null
+    private var networkSocket: java.net.Socket? = null
+    private var wifiServerJob: Job? = null
     
     // PQC Key exchange data
     private var senderState: Any? = null
     private var receiverState: Any? = null
     private var finalSharedSecret: ByteArray? = null
     private var defaultOutputDir: File? = null
+    private var pickedFolderUri: Uri? = null
+    private var pendingStartListening: Boolean = false
     
     // Bluetooth enable launcher for Android 12+ compatibility
     private val bluetoothEnableLauncher = registerForActivityResult(
@@ -68,12 +90,217 @@ class SecureShareBluetoothFileActivity : AppCompatActivity() {
         }
     }
 
+    private fun startBluetoothDiscoveryFallback() {
+        bluetoothAdapter?.let { adapter ->
+            if (!adapter.isEnabled) {
+                val enableBtIntent = Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE)
+                startActivityForResult(enableBtIntent, REQUEST_ENABLE_BT)
+                return
+            }
+
+            if (adapter.isDiscovering) {
+                adapter.cancelDiscovery()
+            }
+
+            discoveredDevices.clear()
+            deviceAdapter?.notifyDataSetChanged()
+
+            if (ActivityCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED) {
+                adapter.bondedDevices?.forEach { device ->
+                    if (!discoveredDevices.any { it.address == device.address }) {
+                        discoveredDevices.add(device)
+                        deviceAdapter?.notifyItemInserted(discoveredDevices.size - 1)
+                    }
+                }
+            }
+
+            val discoveryStarted = adapter.startDiscovery()
+            if (!discoveryStarted) {
+                showError("Failed to start device discovery")
+            } else {
+                binding.tvStatus.text = "Scanning for devices... Found ${discoveredDevices.size} paired devices"
+                binding.rvDevices.visibility = View.VISIBLE
+            }
+        }
+    }
+
+    private suspend fun sendEncryptedFileStream() {
+        val inputPath = getRealPathFromUri(selectedFileUri!!)
+            ?: throw Exception("Cannot access file")
+        val inFd = ParcelFileDescriptor.open(File(inputPath), ParcelFileDescriptor.MODE_READ_ONLY)
+        val pipe = ParcelFileDescriptor.createPipe()
+        val pipeRead = pipe[0]
+        val pipeWrite = pipe[1]
+
+        val encJob = kotlinx.coroutines.GlobalScope.async(Dispatchers.IO) {
+            try {
+                RustyCrypto.doubleEncryptFd(finalSharedSecret!!, false, inFd.fd, pipeWrite.fd)
+            } finally {
+                try { inFd.close() } catch (_: Exception) {}
+                try { pipeWrite.close() } catch (_: Exception) {}
+            }
+        }
+
+        val out = currentOutputStream()
+        val src = ParcelFileDescriptor.AutoCloseInputStream(pipeRead)
+        val buf = ByteArray(16 * 1024)
+        var read: Int
+        var sentBytes = 0L
+        val startTs = System.currentTimeMillis()
+        var lastLog = startTs
+        var lastProgress = startTs
+        val watchdog = kotlinx.coroutines.GlobalScope.launch(Dispatchers.IO) {
+            while (isActive) {
+                delay(5000)
+                if (System.currentTimeMillis() - lastProgress > 30000) {
+                    Log.e(TAG, "Send stalled >30s; aborting transport")
+                    try { networkSocket?.close() } catch (_: Exception) {}
+                    try { bluetoothSocket?.close() } catch (_: Exception) {}
+                    break
+                }
+            }
+        }
+        try {
+            while (true) {
+                read = src.read(buf)
+                if (read <= 0) break
+                val sizeBytes = byteArrayOf(
+                    ((read ushr 24) and 0xFF).toByte(),
+                    ((read ushr 16) and 0xFF).toByte(),
+                    ((read ushr 8) and 0xFF).toByte(),
+                    (read and 0xFF).toByte()
+                )
+                out.write(sizeBytes)
+                out.write(buf, 0, read)
+                sentBytes += read
+                lastProgress = System.currentTimeMillis()
+                val now = lastProgress
+                if (now - lastLog >= 1000) {
+                    val mb = sentBytes / (1024.0 * 1024.0)
+                    val speed = mb / (((now - startTs).coerceAtLeast(1)) / 1000.0)
+                    Log.d(TAG, "TX ${String.format("%.2f", mb)} MB @ ${String.format("%.2f", speed)} MB/s")
+                    lastLog = now
+                }
+            }
+            out.write(byteArrayOf(0, 0, 0, 0))
+            out.flush()
+            encJob.await()
+        } finally {
+            watchdog.cancel()
+        }
+    }
+
+    private suspend fun receiveAndDecryptFileStream(originalFileName: String, treeUri: Uri): String {
+        val partialName = "$originalFileName.partial"
+        val outUri = createUniqueDocumentCopySuffix(treeUri, "application/octet-stream", partialName)
+            ?: throw IOException("Failed to create output file in selected folder")
+        val outFd = contentResolver.openFileDescriptor(outUri, "w")
+            ?: throw IOException("Unable to open output descriptor")
+        val pipe = ParcelFileDescriptor.createPipe()
+        val pipeRead = pipe[0]
+        val pipeWrite = pipe[1]
+
+        val decJob = kotlinx.coroutines.GlobalScope.async(Dispatchers.IO) {
+            try {
+                RustyCrypto.doubleDecryptFd(finalSharedSecret!!, false, pipeRead.fd, outFd.fd)
+            } finally {
+                try { pipeRead.close() } catch (_: Exception) {}
+                try { outFd.close() } catch (_: Exception) {}
+            }
+        }
+
+        val sink = ParcelFileDescriptor.AutoCloseOutputStream(pipeWrite)
+        val `in` = currentInputStream()
+        val lenBuf = ByteArray(4)
+        var recvBytes = 0L
+        val startTs = System.currentTimeMillis()
+        var lastLog = startTs
+        var lastProgress = startTs
+        val watchdog = kotlinx.coroutines.GlobalScope.launch(Dispatchers.IO) {
+            while (isActive) {
+                delay(5000)
+                if (System.currentTimeMillis() - lastProgress > 30000) {
+                    Log.e(TAG, "Recv stalled >30s; aborting transport")
+                    try { networkSocket?.close() } catch (_: Exception) {}
+                    try { bluetoothSocket?.close() } catch (_: Exception) {}
+                    break
+                }
+            }
+        }
+        while (true) {
+            var total = 0
+            while (total < 4) {
+                val r = `in`.read(lenBuf, total, 4 - total)
+                if (r == -1) throw IOException("Connection closed while reading chunk length")
+                total += r
+            }
+            val size = ((lenBuf[0].toInt() and 0xFF) shl 24) or
+                       ((lenBuf[1].toInt() and 0xFF) shl 16) or
+                       ((lenBuf[2].toInt() and 0xFF) shl 8) or
+                       (lenBuf[3].toInt() and 0xFF)
+            if (size == 0) break
+            var remaining = size
+            val buf = ByteArray(16 * 1024)
+            while (remaining > 0) {
+                val toRead = minOf(remaining, buf.size)
+                val r = `in`.read(buf, 0, toRead)
+                if (r == -1) throw IOException("Connection closed while reading chunk data")
+                sink.write(buf, 0, r)
+                remaining -= r
+                recvBytes += r
+                lastProgress = System.currentTimeMillis()
+                val now = lastProgress
+                if (now - lastLog >= 1000) {
+                    val mb = recvBytes / (1024.0 * 1024.0)
+                    val speed = mb / (((now - startTs).coerceAtLeast(1)) / 1000.0)
+                    Log.d(TAG, "RX ${String.format("%.2f", mb)} MB @ ${String.format("%.2f", speed)} MB/s")
+                    lastLog = now
+                }
+            }
+        }
+        sink.flush()
+        sink.close()
+        val result = try { decJob.await() } finally { watchdog.cancel() }
+        return if (result == RustyCrypto.CRYPTO_SUCCESS) {
+            try {
+                val renamed = android.provider.DocumentsContract.renameDocument(contentResolver, outUri, originalFileName)
+                (renamed ?: outUri).toString()
+            } catch (_: Exception) {
+                outUri.toString()
+            }
+        } else {
+            try { android.provider.DocumentsContract.deleteDocument(contentResolver, outUri) } catch (_: Exception) {}
+            throw IOException("Decryption failed (code=$result)")
+        }
+    }
+
+    private fun currentInputStream(): InputStream {
+        networkSocket?.let { return it.getInputStream() }
+        return bluetoothSocket?.inputStream ?: throw IOException("No active transport")
+    }
+
+    private fun currentOutputStream(): OutputStream {
+        networkSocket?.let { return it.getOutputStream() }
+        return bluetoothSocket?.outputStream ?: throw IOException("No active transport")
+    }
+
+    private suspend fun waitForNetworkSocket(timeoutMs: Long): Boolean {
+        val start = System.currentTimeMillis()
+        while (System.currentTimeMillis() - start < timeoutMs) {
+            if (networkSocket != null && (runCatching { networkSocket!!.isConnected }.getOrDefault(false))) return true
+            delay(200)
+        }
+        return networkSocket != null && (runCatching { networkSocket!!.isConnected }.getOrDefault(false))
+    }
+
     companion object {
         private const val UUID_STRING = "8ce255c0-223a-11e0-ac64-0800200c9a66"
         private val MY_UUID = UUID.fromString(UUID_STRING)
         private const val REQUEST_ENABLE_BT = 1
         private const val REQUEST_DISCOVERABLE_BT = 2
         private const val PERMISSIONS_REQUEST_CODE = 100
+        private const val TAG = "PQrypt"
+        private const val WIFI_PORT = 8988
     }
 
     private val filePickerLauncher = registerForActivityResult(
@@ -89,6 +316,30 @@ class SecureShareBluetoothFileActivity : AppCompatActivity() {
                 // Auto-generate keys when file is selected
                 if (isSender) {
                     autoGenerateInitialKeys()
+                }
+            }
+        }
+    }
+
+    private val folderPickerLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == Activity.RESULT_OK) {
+            val data = result.data
+            val treeUri = data?.data
+            if (treeUri != null) {
+                val flags = data.flags
+                try {
+                    contentResolver.takePersistableUriPermission(
+                        treeUri,
+                        (flags and (Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION))
+                    )
+                } catch (_: Exception) {}
+                pickedFolderUri = treeUri
+                binding.tvStatus.text = "Destination folder selected"
+                if (pendingStartListening) {
+                    pendingStartListening = false
+                    startListening()
                 }
             }
         }
@@ -128,21 +379,20 @@ class SecureShareBluetoothFileActivity : AppCompatActivity() {
         setupUI()
         setupDefaultOutputLocation()
         checkPermissions()  // Check permissions before setting up Bluetooth
+        ensureLocationEnabledOrPrompt()
         updateUI()
     }
     
     private fun setupDefaultOutputLocation() {
         try {
-            // Create default output directory: Documents/PQrypt/
-            val documentsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS)
-            defaultOutputDir = File(documentsDir, "PQrypt")
-            
+            val base = getExternalFilesDir(android.os.Environment.DIRECTORY_DOCUMENTS) ?: filesDir
+            defaultOutputDir = java.io.File(base, "PQrypt")
             if (!defaultOutputDir!!.exists()) {
                 defaultOutputDir!!.mkdirs()
             }
         } catch (e: Exception) {
-            // Fallback to the same default path, not app-specific directory
-            defaultOutputDir = File("/storage/emulated/0/Documents/PQrypt")
+            val base = filesDir
+            defaultOutputDir = java.io.File(base, "PQrypt")
             if (!defaultOutputDir!!.exists()) {
                 defaultOutputDir!!.mkdirs()
             }
@@ -238,6 +488,11 @@ class SecureShareBluetoothFileActivity : AppCompatActivity() {
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
             permissions.add(Manifest.permission.ACCESS_COARSE_LOCATION)
         }
+        if (android.os.Build.VERSION.SDK_INT >= 33) {
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.NEARBY_WIFI_DEVICES) != PackageManager.PERMISSION_GRANTED) {
+                permissions.add(Manifest.permission.NEARBY_WIFI_DEVICES)
+            }
+        }
 
         if (permissions.isNotEmpty()) {
             ActivityCompat.requestPermissions(this, permissions.toTypedArray(), PERMISSIONS_REQUEST_CODE)
@@ -254,7 +509,7 @@ class SecureShareBluetoothFileActivity : AppCompatActivity() {
         }
         
         binding.btnDiscoverConnect.isEnabled = true
-        binding.tvStatus.text = if (isSender) "Ready to discover devices" else "Ready to listen for connections"
+        binding.tvStatus.text = if (isSender) "Sender: After receiver taps 'Listen for Connection', tap 'Discover Devices' and connect." else "Receiver: Tap 'Listen for Connection' first and keep this screen open, then wait for sender."
         
         // Register Bluetooth receiver
         val filter = IntentFilter().apply {
@@ -300,6 +555,8 @@ class SecureShareBluetoothFileActivity : AppCompatActivity() {
     }
 
     private fun startDiscovery() {
+
+        if (!ensureLocationEnabledOrPrompt()) return
         if (ActivityCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_SCAN) != PackageManager.PERMISSION_GRANTED) {
             showError("Bluetooth scan permission required")
             return
@@ -342,11 +599,20 @@ class SecureShareBluetoothFileActivity : AppCompatActivity() {
     }
 
     private fun startListening() {
+        if (pickedFolderUri == null) {
+            pendingStartListening = true
+            binding.tvStatus.text = "Select destination folder, then listening will start"
+            launchPickFolder()
+            return
+        }
+        startBluetoothListenFallback()
+    }
+
+    private fun startBluetoothListenFallback() {
         if (ActivityCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED) {
             showError("Bluetooth connect permission required")
             return
         }
-        
         bluetoothAdapter?.let { adapter ->
             if (!adapter.isEnabled) {
                 val enableBtIntent = Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE)
@@ -388,6 +654,174 @@ class SecureShareBluetoothFileActivity : AppCompatActivity() {
         }
     }
 
+    private suspend fun tryStartWifiDirectReceiver(): Boolean {
+        try {
+            val wm = applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
+            if (!wm.isWifiEnabled) {
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(this@SecureShareBluetoothFileActivity, "Turn on Wi‑Fi to use Wi‑Fi Direct", Toast.LENGTH_LONG).show()
+                    try { startActivity(Intent(Settings.ACTION_WIFI_SETTINGS)) } catch (_: Exception) {}
+                }
+                return false
+            }
+            wifiP2pManager = getSystemService(Context.WIFI_P2P_SERVICE) as WifiP2pManager
+            wifiChannel = wifiP2pManager?.initialize(this, Looper.getMainLooper(), null)
+            if (android.os.Build.VERSION.SDK_INT >= 33 && ContextCompat.checkSelfPermission(this, Manifest.permission.NEARBY_WIFI_DEVICES) != PackageManager.PERMISSION_GRANTED) {
+                return false
+            }
+            val deferred = kotlinx.coroutines.CompletableDeferred<Boolean>()
+            withContext(Dispatchers.Main) {
+                wifiP2pManager?.createGroup(wifiChannel, object : WifiP2pManager.ActionListener {
+                    override fun onSuccess() { deferred.complete(true) }
+                    override fun onFailure(reason: Int) { deferred.complete(false) }
+                })
+            }
+            val created = withTimeoutOrNull(15000) { deferred.await() } ?: false
+            if (!created) return false
+            withContext(Dispatchers.Main) {
+                binding.tvConnectionStatus.text = "Wi‑Fi Direct group created. Waiting for sender..."
+            }
+            tcpServerSocket = java.net.ServerSocket(WIFI_PORT)
+            val sock = withTimeoutOrNull(30000) { tcpServerSocket!!.accept() }
+            if (sock == null) {
+                try { tcpServerSocket?.close() } catch (_: Exception) {}
+                try { wifiP2pManager?.removeGroup(wifiChannel, null) } catch (_: Exception) {}
+                return false
+            }
+            networkSocket = sock
+            isWifiDirectActive = true
+            withContext(Dispatchers.Main) {
+                binding.tvConnectionStatus.text = "Wi‑Fi Direct connected"
+            }
+            return true
+        } catch (_: Exception) {
+            return false
+        }
+    }
+
+    private suspend fun tryStartWifiDirectReceiverNonBlocking(): Boolean {
+        return try {
+            val wm = applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
+            if (!wm.isWifiEnabled) {
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(this@SecureShareBluetoothFileActivity, "Turn on Wi‑Fi to use Wi‑Fi Direct", Toast.LENGTH_LONG).show()
+                    try { startActivity(Intent(Settings.ACTION_WIFI_SETTINGS)) } catch (_: Exception) {}
+                }
+                false
+            } else {
+            wifiP2pManager = getSystemService(Context.WIFI_P2P_SERVICE) as WifiP2pManager
+            wifiChannel = wifiP2pManager?.initialize(this, Looper.getMainLooper(), null)
+            if (android.os.Build.VERSION.SDK_INT >= 33 && ContextCompat.checkSelfPermission(this, Manifest.permission.NEARBY_WIFI_DEVICES) != PackageManager.PERMISSION_GRANTED) {
+                false
+            } else {
+                val created = kotlinx.coroutines.CompletableDeferred<Boolean>()
+                withContext(Dispatchers.Main) {
+                    wifiP2pManager?.createGroup(wifiChannel, object : WifiP2pManager.ActionListener {
+                        override fun onSuccess() { created.complete(true) }
+                        override fun onFailure(reason: Int) { created.complete(false) }
+                    })
+                }
+                val ok = withTimeoutOrNull(15000) { created.await() } ?: false
+                if (!ok) return false
+                // Start background accept without blocking caller
+                wifiServerJob?.cancel()
+                wifiServerJob = lifecycleScope.launch(Dispatchers.IO) {
+                    try {
+                        tcpServerSocket = java.net.ServerSocket(WIFI_PORT)
+                        val sock = tcpServerSocket!!.accept()
+                        networkSocket = sock
+                        isWifiDirectActive = true
+                        Log.d(TAG, "Wi‑Fi Direct TCP accept completed")
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Wi‑Fi Direct TCP accept failed: ${e.message}")
+                    }
+                }
+                true
+            }
+            }
+        } catch (_: Exception) { false }
+    }
+
+    private suspend fun tryStartWifiDirectSender(): Boolean {
+        try {
+            val wm = applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
+            if (!wm.isWifiEnabled) {
+                withContext(Dispatchers.Main) {
+                    Toast.makeText(this@SecureShareBluetoothFileActivity, "Turn on Wi‑Fi to use Wi‑Fi Direct", Toast.LENGTH_LONG).show()
+                    try { startActivity(Intent(Settings.ACTION_WIFI_SETTINGS)) } catch (_: Exception) {}
+                }
+                return false
+            }
+            wifiP2pManager = getSystemService(Context.WIFI_P2P_SERVICE) as WifiP2pManager
+            wifiChannel = wifiP2pManager?.initialize(this, Looper.getMainLooper(), null)
+            if (android.os.Build.VERSION.SDK_INT >= 33 && ContextCompat.checkSelfPermission(this, Manifest.permission.NEARBY_WIFI_DEVICES) != PackageManager.PERMISSION_GRANTED) {
+                return false
+            }
+            val disc = kotlinx.coroutines.CompletableDeferred<Boolean>()
+            withContext(Dispatchers.Main) {
+                wifiP2pManager?.discoverPeers(wifiChannel, object : WifiP2pManager.ActionListener {
+                    override fun onSuccess() { disc.complete(true) }
+                    override fun onFailure(reason: Int) { disc.complete(false) }
+                })
+            }
+            val started = withTimeoutOrNull(10000) { disc.await() } ?: false
+            if (!started) return false
+            delay(2000)
+            val peersDef = kotlinx.coroutines.CompletableDeferred<Collection<WifiP2pDevice>>()
+            withContext(Dispatchers.Main) {
+                wifiP2pManager?.requestPeers(wifiChannel) { list ->
+                    peersDef.complete(list.deviceList)
+                }
+            }
+            val peers = withTimeoutOrNull(10000) { peersDef.await() } ?: emptyList()
+            if (peers.isEmpty()) return false
+            val device = peers.first()
+            val cfg = WifiP2pConfig().apply {
+                deviceAddress = device.deviceAddress
+                wps.setup = WpsInfo.PBC
+            }
+            val conn = kotlinx.coroutines.CompletableDeferred<Boolean>()
+            withContext(Dispatchers.Main) {
+                wifiP2pManager?.connect(wifiChannel, cfg, object : WifiP2pManager.ActionListener {
+                    override fun onSuccess() { conn.complete(true) }
+                    override fun onFailure(reason: Int) { conn.complete(false) }
+                })
+            }
+            val connected = withTimeoutOrNull(20000) { conn.await() } ?: false
+            if (!connected) return false
+            var info: WifiP2pInfo? = null
+            val start = System.currentTimeMillis()
+            while (System.currentTimeMillis() - start < 30000) {
+                val infoDef = kotlinx.coroutines.CompletableDeferred<WifiP2pInfo>()
+                withContext(Dispatchers.Main) {
+                    wifiP2pManager?.requestConnectionInfo(wifiChannel) { i -> infoDef.complete(i) }
+                }
+                info = withTimeoutOrNull(3000) { infoDef.await() }
+                if (info != null && info!!.groupFormed) break
+                delay(1000)
+            }
+            if (info == null || !info!!.groupFormed) return false
+            if (info!!.isGroupOwner) {
+                tcpServerSocket = java.net.ServerSocket(WIFI_PORT)
+                val sock = withTimeoutOrNull(30000) { tcpServerSocket!!.accept() }
+                if (sock == null) return false
+                networkSocket = sock
+            } else {
+                val host = info!!.groupOwnerAddress.hostAddress
+                val sock = java.net.Socket()
+                sock.connect(java.net.InetSocketAddress(host, WIFI_PORT), 30000)
+                networkSocket = sock
+            }
+            isWifiDirectActive = true
+            withContext(Dispatchers.Main) {
+                binding.tvConnectionStatus.text = "Wi‑Fi Direct connected"
+            }
+            return true
+        } catch (_: Exception) {
+            return false
+        }
+    }
+
     private fun connectToDevice(device: BluetoothDevice) {
         if (ActivityCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED) {
             showError("Bluetooth connect permission required")
@@ -417,8 +851,8 @@ class SecureShareBluetoothFileActivity : AppCompatActivity() {
                     
                     // Wait for pairing to complete
                     var attempts = 0
-                    while (device.bondState == BluetoothDevice.BOND_BONDING && attempts < 30) {
-                        Thread.sleep(1000)
+                    while (device.bondState == BluetoothDevice.BOND_BONDING && attempts < 120) {
+                        delay(1000)
                         attempts++
                     }
                     
@@ -520,37 +954,39 @@ class SecureShareBluetoothFileActivity : AppCompatActivity() {
             binding.tvProgressTitle.text = "Performing Key Exchange..."
             binding.progressBar.progress = 10
         }
-
-        // Step 1: Send initial key (package1)
         val package1 = RustyCrypto.hybridSenderInit()
         sendBluetoothData(package1)
-        
-        withContext(Dispatchers.Main) {
-            binding.progressBar.progress = 30
-        }
-
-        // Step 2: Receive response key (package2) and derive final key
-        val package2 = receiveBluetoothData()
-        finalSharedSecret = RustyCrypto.hybridSenderFinal(package2)
-        
+        withContext(Dispatchers.Main) { binding.progressBar.progress = 30 }
+        val package2Bundle = receiveBluetoothData()
+        val third = RustyCrypto.hybridSenderThird(package2Bundle) as Array<*>
+        val package3 = third[0] as ByteArray
+        finalSharedSecret = third[1] as ByteArray
+        sendBluetoothData(package3)
         withContext(Dispatchers.Main) {
             binding.progressBar.progress = 60
             binding.tvProgressTitle.text = "Encrypting and Sending File..."
         }
-
-        // Step 4: Send filename first, then encrypt and send file
         val originalFileName = getFileName(selectedFileUri!!) ?: "unknown_file"
+        // Send file name over Bluetooth (control channel)
         sendBluetoothFileName(originalFileName)
-        
-        val encryptedFileData = encryptSelectedFile()
-        sendBluetoothFile(encryptedFileData)
-        
+        // Ask receiver to use Wi‑Fi Direct; coordinate via Bluetooth control messages
+        Log.d(TAG, "Requesting Wi‑Fi Direct data path")
+        sendBluetoothData("USE_WIFI".toByteArray(Charsets.UTF_8))
+        val wifiResp = String(receiveBluetoothData(), Charsets.UTF_8)
+        Log.d(TAG, "Receiver Wi‑Fi response: $wifiResp")
+        var wifiOk = false
+        if (wifiResp == "WIFI_READY") {
+            withContext(Dispatchers.Main) { binding.tvConnectionStatus.text = "Connecting via Wi‑Fi Direct..." }
+            wifiOk = tryStartWifiDirectSender()
+        }
+        withContext(Dispatchers.Main) {
+            if (wifiOk) showSuccess("Wi‑Fi Direct connected for file transfer") else showError("Using Bluetooth for file transfer")
+        }
+        sendEncryptedFileStream()
         withContext(Dispatchers.Main) {
             binding.progressBar.progress = 100
             binding.tvProgressTitle.text = "Transfer Complete!"
             showSuccess("File encrypted and sent successfully!")
-            
-            // Cleanup intermediate files
             cleanupIntermediateFiles()
         }
     }
@@ -561,38 +997,87 @@ class SecureShareBluetoothFileActivity : AppCompatActivity() {
             binding.tvProgressTitle.text = "Performing Key Exchange..."
             binding.progressBar.progress = 10
         }
-
-        // Step 1: Receive initial key (package1)
         val package1 = receiveBluetoothData()
-        val recvResult = RustyCrypto.hybridReceiver(package1)
-        
-        // Step 2: Send response key (package2) and get final key
-        val package2 = recvResult[0] as ByteArray
-        finalSharedSecret = recvResult[1] as ByteArray
-        sendBluetoothData(package2)
-        
-        withContext(Dispatchers.Main) {
-            binding.progressBar.progress = 40
-        }
-        
+        val package2Bundle = RustyCrypto.hybridReceiverDual(package1)
+        sendBluetoothData(package2Bundle)
+        withContext(Dispatchers.Main) { binding.progressBar.progress = 40 }
+        val package3 = receiveBluetoothData()
+        finalSharedSecret = RustyCrypto.hybridReceiverFinalDual(package3)
         withContext(Dispatchers.Main) {
             binding.progressBar.progress = 60
             binding.tvProgressTitle.text = "Receiving and Decrypting File..."
         }
-
-        // Step 4: Receive filename first, then receive and decrypt file
+        // Receive file name via Bluetooth (control channel)
         val originalFileName = receiveBluetoothFileName()
-        val encryptedFileData = receiveBluetoothFile()
-        val decryptedFilePath = decryptReceivedFile(encryptedFileData, originalFileName)
-        
+        // Listen for sender's transport decision and prepare Wi‑Fi Direct if requested
+        val req = String(receiveBluetoothData(), Charsets.UTF_8)
+        Log.d(TAG, "Sender transport request: $req")
+        var wifiOk = false
+        if (req == "USE_WIFI") {
+            withContext(Dispatchers.Main) { binding.tvConnectionStatus.text = "Preparing Wi‑Fi Direct..." }
+            // Start Wi‑Fi Direct group and background accept; do not block here
+            wifiOk = tryStartWifiDirectReceiverNonBlocking()
+            if (wifiOk) {
+                Log.d(TAG, "Wi‑Fi Direct group created; notifying sender")
+                // Inform sender Wi‑Fi is ready
+                sendBluetoothData("WIFI_READY".toByteArray(Charsets.UTF_8))
+                // Wait for the TCP socket to be connected
+                val got = waitForNetworkSocket(30000)
+                Log.d(TAG, "Wi‑Fi Direct socket ready: $got")
+                if (!got) wifiOk = false
+            } else {
+                Log.e(TAG, "Wi‑Fi Direct setup failed; notifying sender")
+                sendBluetoothData("WIFI_FAIL".toByteArray(Charsets.UTF_8))
+            }
+        }
+        if (!wifiOk) {
+            // If sender decides to force BT, consume the optional USE_BT message if present (best-effort)
+            // No-op; we'll continue on Bluetooth
+        }
+        val decryptedFilePath = receiveAndDecryptFileStream(originalFileName, pickedFolderUri!!)
         withContext(Dispatchers.Main) {
             binding.progressBar.progress = 100
             binding.tvProgressTitle.text = "Transfer Complete!"
             showOutputLocation("File received and decrypted to:", decryptedFilePath)
-            
-            // Cleanup intermediate files
             cleanupIntermediateFiles()
         }
+    }
+
+    private fun launchPickFolder() {
+        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT_TREE).apply {
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION or Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION or Intent.FLAG_GRANT_PREFIX_URI_PERMISSION)
+            try {
+                val hinted = buildPQryptInitialTreeUri()
+                if (hinted != null) {
+                    putExtra("android.provider.extra.INITIAL_URI", hinted)
+                }
+            } catch (_: Exception) {}
+        }
+        folderPickerLauncher.launch(intent)
+    }
+
+    private fun buildPQryptInitialTreeUri(): Uri? {
+        return try {
+            val docs = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS)
+            val pqrypt = File(docs, "PQrypt")
+            if (!pqrypt.exists()) pqrypt.mkdirs()
+            val authority = "com.android.externalstorage.documents"
+            val docId = "primary:Documents/PQrypt"
+            android.provider.DocumentsContract.buildTreeDocumentUri(authority, docId)
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    private fun createUniqueDocumentCopySuffix(treeUri: Uri, mime: String, desiredName: String): Uri? {
+        val treeDoc = androidx.documentfile.provider.DocumentFile.fromTreeUri(this, treeUri) ?: return null
+        val existing = treeDoc.findFile(desiredName)
+        if (existing != null && existing.exists()) {
+            existing.delete()
+        }
+        val parentDocId = android.provider.DocumentsContract.getTreeDocumentId(treeUri)
+        val parentDocUri = android.provider.DocumentsContract.buildDocumentUriUsingTree(treeUri, parentDocId)
+        return android.provider.DocumentsContract.createDocument(contentResolver, parentDocUri, mime, desiredName)
     }
 
     private fun sendBluetoothData(data: ByteArray?) {
@@ -646,6 +1131,41 @@ class SecureShareBluetoothFileActivity : AppCompatActivity() {
         }
         
         return data
+    }
+
+    private suspend fun receiveBluetoothDataWithTimeout(timeoutMs: Long): ByteArray? {
+        val inputStream = bluetoothSocket?.inputStream ?: return null
+        val start = System.currentTimeMillis()
+        val lengthBytes = ByteArray(4)
+        while (System.currentTimeMillis() - start < timeoutMs) {
+            if (inputStream.available() >= 4) {
+                var totalRead = 0
+                while (totalRead < 4) {
+                    val read = inputStream.read(lengthBytes, totalRead, 4 - totalRead)
+                    if (read == -1) return null
+                    totalRead += read
+                }
+                val length = ((lengthBytes[0].toInt() and 0xFF) shl 24) or
+                             ((lengthBytes[1].toInt() and 0xFF) shl 16) or
+                             ((lengthBytes[2].toInt() and 0xFF) shl 8) or
+                             (lengthBytes[3].toInt() and 0xFF)
+                val data = ByteArray(length)
+                totalRead = 0
+                while (totalRead < length) {
+                    if (inputStream.available() == 0) {
+                        if (System.currentTimeMillis() - start >= timeoutMs) return null
+                        delay(50)
+                        continue
+                    }
+                    val read = inputStream.read(data, totalRead, minOf(length - totalRead, inputStream.available()))
+                    if (read == -1) return null
+                    totalRead += read
+                }
+                return data
+            }
+            delay(50)
+        }
+        return null
     }
 
     private fun sendBluetoothFile(fileData: ByteArray) {
@@ -739,7 +1259,7 @@ class SecureShareBluetoothFileActivity : AppCompatActivity() {
 
     private fun decryptReceivedFile(encryptedData: ByteArray, originalFileName: String): String {
         return try {
-            val outputDir = defaultOutputDir ?: File("/storage/emulated/0/Documents/PQrypt")
+            val outputDir = defaultOutputDir ?: (getExternalFilesDir(Environment.DIRECTORY_DOCUMENTS)?.let { File(it, "PQrypt") } ?: File(filesDir, "PQrypt"))
             if (!outputDir.exists()) {
                 outputDir.mkdirs()
             }
@@ -814,48 +1334,24 @@ class SecureShareBluetoothFileActivity : AppCompatActivity() {
 
     private fun openOutputFolder() {
         try {
-            val outputDir = defaultOutputDir ?: File("/storage/emulated/0/Documents/PQrypt")
-            
-            // Try using DocumentsContract URI for exact folder navigation
-            val documentsUri = android.net.Uri.parse("content://com.android.externalstorage.documents/document/primary%3ADocuments%2FPQrypt")
-            val intent = Intent(Intent.ACTION_VIEW)
-            intent.setDataAndType(documentsUri, "vnd.android.document/directory")
-            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            
-            if (intent.resolveActivity(packageManager) != null) {
-                startActivity(intent)
-            } else {
-                // Fallback 1: Try with file:// URI
-                val fileIntent = Intent(Intent.ACTION_VIEW)
-                fileIntent.setDataAndType(android.net.Uri.fromFile(outputDir), "resource/folder")
-                fileIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                
-                if (fileIntent.resolveActivity(packageManager) != null) {
-                    startActivity(fileIntent)
-                } else {
-                    // Fallback 2: Open file manager with chooser
-                    val fileManagerIntent = Intent(Intent.ACTION_OPEN_DOCUMENT_TREE)
-                    fileManagerIntent.putExtra("android.provider.extra.INITIAL_URI", documentsUri)
-                    
-                    try {
-                        startActivity(fileManagerIntent)
-                    } catch (e: Exception) {
-                        // Final fallback: Show path and open generic file manager
-                        val genericIntent = Intent(Intent.ACTION_GET_CONTENT)
-                        genericIntent.type = "*/*"
-                        genericIntent.addCategory(Intent.CATEGORY_OPENABLE)
-                        
-                        try {
-                            startActivity(Intent.createChooser(genericIntent, "Open File Manager"))
-                            Toast.makeText(this, "Navigate to Documents/PQrypt folder", Toast.LENGTH_LONG).show()
-                        } catch (e2: Exception) {
-                            Toast.makeText(this, "Output files saved to: ${outputDir.absolutePath}", Toast.LENGTH_LONG).show()
-                        }
-                    }
+            val treeUri = pickedFolderUri
+            if (treeUri != null) {
+                val intent = Intent(Intent.ACTION_VIEW).apply {
+                    setDataAndType(treeUri, "vnd.android.document/directory")
+                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
                 }
+                if (intent.resolveActivity(packageManager) != null) {
+                    startActivity(intent)
+                } else {
+                    // Fallback: show the URI
+                    Toast.makeText(this, "Folder: $treeUri", Toast.LENGTH_LONG).show()
+                }
+            } else {
+                Toast.makeText(this, "Please select a destination folder first", Toast.LENGTH_LONG).show()
+                launchPickFolder()
             }
-        } catch (e: Exception) {
-            Toast.makeText(this, "Output files saved to: /storage/emulated/0/Documents/PQrypt", Toast.LENGTH_LONG).show()
+        } catch (_: Exception) {
+            Toast.makeText(this, "Unable to open folder", Toast.LENGTH_LONG).show()
         }
     }
 
@@ -869,6 +1365,17 @@ class SecureShareBluetoothFileActivity : AppCompatActivity() {
         Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
     }
 
+    override fun onDestroy() {
+        super.onDestroy()
+        try { unregisterReceiver(bluetoothReceiver) } catch (_: Exception) {}
+        try { if (wifiP2pReceiver != null) unregisterReceiver(wifiP2pReceiver!!) } catch (_: Exception) {}
+        try { tcpServerSocket?.close() } catch (_: Exception) {}
+        try { networkSocket?.close() } catch (_: Exception) {}
+        try { wifiP2pManager?.removeGroup(wifiChannel, null) } catch (_: Exception) {}
+        try { bluetoothSocket?.close() } catch (_: Exception) {}
+        try { serverSocket?.close() } catch (_: Exception) {}
+    }
+
     
     private fun showOutputLocation(message: String, path: String) {
         binding.tvStatus.text = "$message\n$path"
@@ -877,7 +1384,7 @@ class SecureShareBluetoothFileActivity : AppCompatActivity() {
     
     private fun cleanupIntermediateFiles() {
         try {
-            val outputDir = defaultOutputDir ?: File("/storage/emulated/0/Documents/PQrypt")
+            val outputDir = defaultOutputDir ?: (getExternalFilesDir(Environment.DIRECTORY_DOCUMENTS)?.let { File(it, "PQrypt") } ?: File(filesDir, "PQrypt"))
             if (outputDir.exists()) {
                 // Delete all .key files
                 outputDir.listFiles { _, name -> name.endsWith(".key") }?.forEach { it.delete() }
@@ -899,17 +1406,7 @@ class SecureShareBluetoothFileActivity : AppCompatActivity() {
     }
     
 
-    override fun onDestroy() {
-        super.onDestroy()
-        try {
-            unregisterReceiver(bluetoothReceiver)
-        } catch (e: Exception) {
-            // Failed to unregister receiver
-        }
-        
-        bluetoothSocket?.close()
-        serverSocket?.close()
-    }
+    
 
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
@@ -939,4 +1436,22 @@ class SecureShareBluetoothFileActivity : AppCompatActivity() {
             }
         }
     }
+
+private fun isLocationEnabled(): Boolean {
+    val lm = getSystemService(Context.LOCATION_SERVICE) as LocationManager
+    return lm.isProviderEnabled(LocationManager.GPS_PROVIDER) || lm.isProviderEnabled(LocationManager.NETWORK_PROVIDER)
+}
+
+private fun ensureLocationEnabledOrPrompt(): Boolean {
+    if (isLocationEnabled()) return true
+    AlertDialog.Builder(this)
+        .setTitle("Location required")
+        .setMessage("Enable Location to improve Bluetooth discovery and pairing.")
+        .setPositiveButton("Open Settings") { _, _ ->
+            startActivity(Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS))
+        }
+        .setNegativeButton("Cancel", null)
+        .show()
+    return false
+}
 }

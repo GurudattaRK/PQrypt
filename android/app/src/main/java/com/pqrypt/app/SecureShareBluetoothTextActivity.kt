@@ -14,7 +14,6 @@ import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.os.Bundle
 import android.os.Handler
-import android.os.Looper
 import android.text.Editable
 import android.text.TextWatcher
 import android.view.View
@@ -31,6 +30,10 @@ import android.os.ParcelFileDescriptor
 import android.os.Environment
 import java.io.*
 import java.util.*
+import android.location.LocationManager
+import android.provider.Settings
+import androidx.appcompat.app.AlertDialog
+import android.util.Log
 
 class SecureShareBluetoothTextActivity : AppCompatActivity() {
 
@@ -86,6 +89,7 @@ class SecureShareBluetoothTextActivity : AppCompatActivity() {
         if (result.resultCode == Activity.RESULT_OK) {
             Toast.makeText(this, "Bluetooth enabled", Toast.LENGTH_SHORT).show()
             checkPermissions()
+            ensureLocationEnabledOrPrompt()
         } else {
             showError("Bluetooth is required for this feature")
         }
@@ -97,6 +101,7 @@ class SecureShareBluetoothTextActivity : AppCompatActivity() {
         private const val REQUEST_ENABLE_BT = 1
         private const val REQUEST_DISCOVERABLE_BT = 2
         private const val PERMISSIONS_REQUEST_CODE = 100
+        private const val TAG = "PQrypt"
     }
 
 
@@ -115,7 +120,9 @@ class SecureShareBluetoothTextActivity : AppCompatActivity() {
         setupUI()
         setupDefaultOutputLocation()
         checkPermissions()  // Check permissions before setting up Bluetooth
+        ensureLocationEnabledOrPrompt()
         updateUI()
+        try { Log.d(TAG, "TextActivity onCreate role=" + role + " isSender=" + isSender + " transferMode=" + transferMode + " contentType=" + contentType) } catch (_: Exception) {}
     }
     
     private fun setupDefaultOutputLocation() {
@@ -127,12 +134,14 @@ class SecureShareBluetoothTextActivity : AppCompatActivity() {
             if (!defaultOutputDir!!.exists()) {
                 defaultOutputDir!!.mkdirs()
             }
+            try { Log.d(TAG, "Default output dir=" + defaultOutputDir!!.absolutePath) } catch (_: Exception) {}
         } catch (e: Exception) {
             // Fallback to the same default path, not app-specific directory
             defaultOutputDir = File("/storage/emulated/0/Documents/PQrypt")
             if (!defaultOutputDir!!.exists()) {
                 defaultOutputDir!!.mkdirs()
             }
+            try { Log.e(TAG, "Default output dir fallback due to: " + e.message) } catch (_: Exception) {}
         }
     }
 
@@ -155,7 +164,7 @@ class SecureShareBluetoothTextActivity : AppCompatActivity() {
                 
                 // Auto-generate keys when text is entered (for sender)
                 if (isSender && inputText.trim().isNotEmpty()) {
-                    autoGenerateInitialKeys()
+                    // autoGenerateInitialKeys disabled
                 }
             }
         })
@@ -202,6 +211,9 @@ class SecureShareBluetoothTextActivity : AppCompatActivity() {
         if (!bluetoothAdapter!!.isEnabled) {
             val enableBtIntent = Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE)
             bluetoothEnableLauncher.launch(enableBtIntent)
+            try { Log.d(TAG, "Requested Bluetooth enable") } catch (_: Exception) {}
+        } else {
+            try { Log.d(TAG, "Bluetooth already enabled") } catch (_: Exception) {}
         }
     }
 
@@ -237,6 +249,7 @@ class SecureShareBluetoothTextActivity : AppCompatActivity() {
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
             permissions.add(Manifest.permission.ACCESS_COARSE_LOCATION)
         }
+        // No NEARBY_WIFI_DEVICES permission needed for Text flow (Bluetooth only)
 
         if (permissions.isNotEmpty()) {
             ActivityCompat.requestPermissions(this, permissions.toTypedArray(), PERMISSIONS_REQUEST_CODE)
@@ -261,6 +274,7 @@ class SecureShareBluetoothTextActivity : AppCompatActivity() {
             addAction(BluetoothAdapter.ACTION_DISCOVERY_FINISHED)
         }
         registerReceiver(discoveryReceiver, filter)
+        try { Log.d(TAG, "Permissions granted; discovery receiver registered") } catch (_: Exception) {}
     }
 
     private fun updateUI() {
@@ -276,36 +290,17 @@ class SecureShareBluetoothTextActivity : AppCompatActivity() {
         if (isSender) {
             binding.btnDiscoverConnect.isEnabled = inputText.trim().isNotEmpty() && bluetoothAdapter?.isEnabled == true
         }
-    }
+    
+        binding.tvStatus.text = if (isSender) "Sender: After receiver taps 'Listen for Connection', tap 'Discover Devices' and connect." else "Receiver: Tap 'Listen for Connection' first and keep this screen open, then wait for sender."
+}
 
     private fun autoGenerateInitialKeys() {
-        if (!isSender || inputText.trim().isEmpty()) return
-
-        lifecycleScope.launch(Dispatchers.IO) {
-            try {
-                // Create temporary text file
-                createTempTextFile()
-                
-                val result = RustyCrypto.hybridSenderInit()
-                if (result != null && result.isNotEmpty()) {
-                    // Store sender state for later use
-                    withContext(Dispatchers.Main) {
-                        binding.tvStatus.text = "Text transferred successfully!"
-                        showSuccess("Text sent via Bluetooth!")
-                        
-                        // Cleanup intermediate files
-                        cleanupIntermediateFiles()
-                    }
-                }
-            } catch (e: Exception) {
-                withContext(Dispatchers.Main) {
-                    showError("Key generation failed: ${e.message}")
-                }
-            }
-        }
+        return
     }
 
     private fun startDiscovery() {
+
+        if (!ensureLocationEnabledOrPrompt()) return
         if (ActivityCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_SCAN) != PackageManager.PERMISSION_GRANTED) {
             showError("Bluetooth scan permission required")
             return
@@ -326,11 +321,13 @@ class SecureShareBluetoothTextActivity : AppCompatActivity() {
                 }
                 registerReceiver(discoveryReceiver, filter)
                 isDiscoveryReceiverRegistered = true
+                try { Log.d(TAG, "Registered discovery receiver dynamically") } catch (_: Exception) {}
             }
 
             // Cancel any ongoing discovery first
             if (adapter.isDiscovering) {
                 adapter.cancelDiscovery()
+                try { Log.d(TAG, "Canceled ongoing discovery before restart") } catch (_: Exception) {}
             }
 
             discoveredDevices.clear()
@@ -344,6 +341,7 @@ class SecureShareBluetoothTextActivity : AppCompatActivity() {
                         deviceAdapter?.notifyItemInserted(discoveredDevices.size - 1)
                     }
                 }
+                try { Log.d(TAG, "Paired devices added count=" + discoveredDevices.size) } catch (_: Exception) {}
             }
             
             // Start discovery for new devices
@@ -353,6 +351,7 @@ class SecureShareBluetoothTextActivity : AppCompatActivity() {
             } else {
                 binding.tvStatus.text = "Scanning for devices... Found ${discoveredDevices.size} paired devices"
                 binding.rvDevices.visibility = View.VISIBLE
+                try { Log.d(TAG, "Discovery started; initial count=" + discoveredDevices.size) } catch (_: Exception) {}
             }
         }
     }
@@ -372,6 +371,7 @@ class SecureShareBluetoothTextActivity : AppCompatActivity() {
             
             lifecycleScope.launch(Dispatchers.IO) {
                 try {
+                    try { Log.d(TAG, "Receiver: starting RFCOMM server socket") } catch (_: Exception) {}
                     serverSocket = adapter.listenUsingRfcommWithServiceRecord("PQryptSecureTextShare", MY_UUID)
                     
                     withContext(Dispatchers.Main) {
@@ -386,18 +386,21 @@ class SecureShareBluetoothTextActivity : AppCompatActivity() {
                     }
     
                     // Accept incoming connection (this blocks until connection is made)
+                    try { Log.d(TAG, "Receiver: waiting for RFCOMM accept()") } catch (_: Exception) {}
                     val socket = serverSocket?.accept()
                     socket?.let {
                         withContext(Dispatchers.Main) {
                             bluetoothSocket = it
                             binding.tvConnectionStatus.text = "Connected to ${it.remoteDevice.name ?: it.remoteDevice.address}"
                             showSuccess("Incoming Bluetooth connection accepted")
+                            try { Log.d(TAG, "Receiver: accepted RFCOMM from=" + (it.remoteDevice.name ?: it.remoteDevice.address)) } catch (_: Exception) {}
                             startKeyExchangeAsReceiver()
                         }
                     }
                 } catch (e: IOException) {
                     withContext(Dispatchers.Main) {
                         showError("Failed to start listening: ${e.message}")
+                        try { Log.e(TAG, "Receiver: listen/accept failed: " + e.message) } catch (_: Exception) {}
                     }
                 }
             }
@@ -413,17 +416,20 @@ class SecureShareBluetoothTextActivity : AppCompatActivity() {
         selectedDevice = device
         binding.tvConnectionStatus.text = "Connecting to ${device.name ?: device.address}..."
         binding.tvStatus.text = "Establishing connection..."
+        try { Log.d(TAG, "Sender: connectToDevice name=" + (device.name ?: "?") + " addr=" + device.address) } catch (_: Exception) {}
 
         lifecycleScope.launch(Dispatchers.IO) {
             try {
                 // Cancel discovery to improve connection performance
                 bluetoothAdapter?.cancelDiscovery()
+                try { Log.d(TAG, "Sender: canceled discovery before connecting") } catch (_: Exception) {}
                 
                 // Check if device is paired, if not try to pair first
                 if (device.bondState != BluetoothDevice.BOND_BONDED) {
                     withContext(Dispatchers.Main) {
                         showSuccess("Pairing with device...")
                     }
+                    try { Log.d(TAG, "Sender: initiating pairing") } catch (_: Exception) {}
                     
                     // Attempt to pair
                     val paired = device.createBond()
@@ -433,14 +439,15 @@ class SecureShareBluetoothTextActivity : AppCompatActivity() {
                     
                     // Wait for pairing to complete
                     var attempts = 0
-                    while (device.bondState == BluetoothDevice.BOND_BONDING && attempts < 30) {
-                        Thread.sleep(1000)
+                    while (device.bondState == BluetoothDevice.BOND_BONDING && attempts < 120) {
+                        delay(1000)
                         attempts++
                     }
                     
                     if (device.bondState != BluetoothDevice.BOND_BONDED) {
                         throw IOException("Device pairing failed or timed out")
                     }
+                    try { Log.d(TAG, "Sender: pairing complete") } catch (_: Exception) {}
                 }
                 
                 // Try multiple connection methods for better compatibility
@@ -449,31 +456,39 @@ class SecureShareBluetoothTextActivity : AppCompatActivity() {
                 
                 // Add delay to ensure the target device is ready
                 Thread.sleep(2000)
+                try { Log.d(TAG, "Sender: attempting RFCOMM method 1") } catch (_: Exception) {}
                 
                 // Method 1: Standard RFCOMM connection
                 try {
                     socket = device.createRfcommSocketToServiceRecord(MY_UUID)
                     socket.connect()
                     connected = true
+                    try { Log.d(TAG, "Sender: RFCOMM method 1 success") } catch (_: Exception) {}
                 } catch (e: IOException) {
                     socket?.close()
+                    try { Log.e(TAG, "Sender: RFCOMM method 1 failed: " + e.message) } catch (_: Exception) {}
                     
                     // Method 2: Fallback using reflection for older devices
                     try {
+                        try { Log.d(TAG, "Sender: attempting RFCOMM method 2 (reflection)") } catch (_: Exception) {}
                         val method = device.javaClass.getMethod("createRfcommSocket", Int::class.javaPrimitiveType)
                         socket = method.invoke(device, 1) as BluetoothSocket
                         socket.connect()
                         connected = true
+                        try { Log.d(TAG, "Sender: RFCOMM method 2 success") } catch (_: Exception) {}
                     } catch (e2: Exception) {
                         socket?.close()
+                        try { Log.e(TAG, "Sender: RFCOMM method 2 failed: " + e2.message) } catch (_: Exception) {}
                         
                         // Method 3: Try different RFCOMM channels
+                        try { Log.d(TAG, "Sender: attempting RFCOMM method 3 (channels 1..30)") } catch (_: Exception) {}
                         for (channel in 1..30) {
                             try {
                                 val method = device.javaClass.getMethod("createRfcommSocket", Int::class.javaPrimitiveType)
                                 socket = method.invoke(device, channel) as BluetoothSocket
                                 socket.connect()
                                 connected = true
+                                try { Log.d(TAG, "Sender: RFCOMM method 3 success on channel=" + channel) } catch (_: Exception) {}
                                 break
                             } catch (e3: Exception) {
                                 socket?.close()
@@ -491,6 +506,7 @@ class SecureShareBluetoothTextActivity : AppCompatActivity() {
                     withContext(Dispatchers.Main) {
                         binding.tvConnectionStatus.text = "Connected to ${device.name ?: device.address}"
                         showSuccess("Bluetooth connection established")
+                        try { Log.d(TAG, "Sender: RFCOMM connected to=" + (device.name ?: device.address)) } catch (_: Exception) {}
                         startKeyExchangeAsSender()
                     }
                 }
@@ -499,6 +515,7 @@ class SecureShareBluetoothTextActivity : AppCompatActivity() {
                     showError("Connection failed: ${e.message}")
                     bluetoothSocket?.close()
                     bluetoothSocket = null
+                    try { Log.e(TAG, "Sender: connection failed: " + e.message) } catch (_: Exception) {}
                 }
             }
         }
@@ -544,40 +561,43 @@ class SecureShareBluetoothTextActivity : AppCompatActivity() {
             binding.tvProgressTitle.text = "Performing Key Exchange..."
             binding.progressBar.progress = 10
         }
+        try { Log.d(TAG, "SenderFlow: start") } catch (_: Exception) {}
 
-        // Step 1: Send initial key (package1)
         val package1 = RustyCrypto.hybridSenderInit()
+        try { Log.d(TAG, "SenderFlow: sending package1 size=" + package1.size) } catch (_: Exception) {}
         sendBluetoothData(package1)
-        
-        withContext(Dispatchers.Main) {
-            binding.progressBar.progress = 30
-        }
 
-        // Step 2: Receive response key (package2) and derive final key
-        val package2 = receiveBluetoothData()
-        finalSharedSecret = RustyCrypto.hybridSenderFinal(package2)
-        
+        withContext(Dispatchers.Main) { binding.progressBar.progress = 30 }
+
+        val package2Bundle = receiveBluetoothData()
+        try { Log.d(TAG, "SenderFlow: received package2 size=" + package2Bundle.size) } catch (_: Exception) {}
+        val third = RustyCrypto.hybridSenderThird(package2Bundle) as Array<*>
+        val package3 = third[0] as ByteArray
+        finalSharedSecret = third[1] as ByteArray
+        try { Log.d(TAG, "SenderFlow: sending package3 size=" + package3.size + ", sharedSecret set=" + (finalSharedSecret != null)) } catch (_: Exception) {}
+        sendBluetoothData(package3)
+
         withContext(Dispatchers.Main) {
             binding.progressBar.progress = 60
             binding.tvProgressTitle.text = "Encrypting and Sending Text..."
         }
 
-        // Step 3: Encrypt and send text
         val encryptedTextData = encryptInputText()
-        if (encryptedTextData.isEmpty()) {
-            throw Exception("Failed to encrypt text")
-        }
-        
-        sendBluetoothText(encryptedTextData)
-        
+        if (encryptedTextData.isEmpty()) throw Exception("Failed to encrypt text")
+        try { Log.d(TAG, "SenderFlow: encrypted text bytes=" + encryptedTextData.size) } catch (_: Exception) {}
+
+        // Use Bluetooth transport for text data (no Wi‑Fi Direct)
+        try { Log.d(TAG, "SenderFlow: using Bluetooth transport for text") } catch (_: Exception) {}
+        sendTextOverCurrentStream(encryptedTextData)
+        try { Log.d(TAG, "SenderFlow: text sent over=bluetooth") } catch (_: Exception) {}
+
         withContext(Dispatchers.Main) {
             binding.progressBar.progress = 100
             binding.tvProgressTitle.text = "Transfer Complete!"
             showSuccess("Text encrypted and sent successfully!")
-            
-            // Cleanup intermediate files
             cleanupIntermediateFiles()
         }
+        try { Log.d(TAG, "SenderFlow: done") } catch (_: Exception) {}
     }
 
     private suspend fun performReceiverFlow() {
@@ -586,44 +606,41 @@ class SecureShareBluetoothTextActivity : AppCompatActivity() {
             binding.tvProgressTitle.text = "Performing Key Exchange..."
             binding.progressBar.progress = 10
         }
+        try { Log.d(TAG, "ReceiverFlow: start") } catch (_: Exception) {}
 
-        // Step 1: Receive initial key (package1)
         val package1 = receiveBluetoothData()
-        val recvResult = RustyCrypto.hybridReceiver(package1)
-        
-        // Step 2: Send response key (package2) and get final key
-        val package2 = recvResult[0] as ByteArray
-        finalSharedSecret = recvResult[1] as ByteArray
-        sendBluetoothData(package2)
-        
-        withContext(Dispatchers.Main) {
-            binding.progressBar.progress = 40
-        }
+        try { Log.d(TAG, "ReceiverFlow: received package1 size=" + package1.size) } catch (_: Exception) {}
+        val package2Bundle = RustyCrypto.hybridReceiverDual(package1)
+        try { Log.d(TAG, "ReceiverFlow: sending package2 size=" + package2Bundle.size) } catch (_: Exception) {}
+        sendBluetoothData(package2Bundle)
 
-        // Receiver already has finalSharedSecret from hybridReceiver call above
-        
+        withContext(Dispatchers.Main) { binding.progressBar.progress = 40 }
+
+        val package3 = receiveBluetoothData()
+        try { Log.d(TAG, "ReceiverFlow: received package3 size=" + package3.size) } catch (_: Exception) {}
+        finalSharedSecret = RustyCrypto.hybridReceiverFinalDual(package3)
+        try { Log.d(TAG, "ReceiverFlow: finalSharedSecret set=" + (finalSharedSecret != null)) } catch (_: Exception) {}
+
         withContext(Dispatchers.Main) {
             binding.progressBar.progress = 60
             binding.tvProgressTitle.text = "Receiving and Decrypting Text..."
         }
 
-        // Step 4: Receive and decrypt text
-        val encryptedTextData = receiveBluetoothText()
-        if (encryptedTextData.isEmpty()) {
-            throw Exception("Failed to receive encrypted text data")
-        }
-        
+        // Use Bluetooth transport for text data (no Wi‑Fi Direct)
+        try { Log.d(TAG, "ReceiverFlow: using Bluetooth transport for text") } catch (_: Exception) {}
+        val encryptedTextData = receiveTextOverCurrentStream()
+        try { Log.d(TAG, "ReceiverFlow: received text bytes=" + encryptedTextData.size + " over=bluetooth") } catch (_: Exception) {}
+        if (encryptedTextData.isEmpty()) throw Exception("Failed to receive encrypted text data")
         val decryptedText = decryptReceivedText(encryptedTextData)
-        
+
         withContext(Dispatchers.Main) {
             binding.progressBar.progress = 100
             binding.tvProgressTitle.text = "Transfer Complete!"
             binding.tvReceivedText.text = decryptedText
             showSuccess("Text received and decrypted successfully!")
-            
-            // Cleanup intermediate files
             cleanupIntermediateFiles()
         }
+        try { Log.d(TAG, "ReceiverFlow: done") } catch (_: Exception) {}
     }
 
     private fun sendBluetoothData(data: ByteArray?) {
@@ -639,11 +656,13 @@ class SecureShareBluetoothTextActivity : AppCompatActivity() {
         lengthBytes[1] = (data.size shr 16).toByte()
         lengthBytes[2] = (data.size shr 8).toByte()
         lengthBytes[3] = data.size.toByte()
+        try { Log.d(TAG, "BT send length=" + data.size) } catch (_: Exception) {}
         outputStream.write(lengthBytes)
         
         // Send data
         outputStream.write(data)
         outputStream.flush()
+        try { Log.d(TAG, "BT send done") } catch (_: Exception) {}
     }
 
     private fun receiveBluetoothData(): ByteArray {
@@ -666,6 +685,7 @@ class SecureShareBluetoothTextActivity : AppCompatActivity() {
         if (length <= 0 || length > 1024 * 1024) { // Max 1MB for safety
             throw IOException("Invalid data length: $length")
         }
+        try { Log.d(TAG, "BT recv length=" + length) } catch (_: Exception) {}
         
         // Read data
         val data = ByteArray(length)
@@ -676,41 +696,70 @@ class SecureShareBluetoothTextActivity : AppCompatActivity() {
             totalRead += read
         }
         
+        try { Log.d(TAG, "BT recv done") } catch (_: Exception) {}
         return data
     }
 
-    private fun sendBluetoothText(textData: ByteArray) {
-        // Send text size first
+    private fun sendTextOverCurrentStream(textData: ByteArray) {
+        val out = bluetoothSocket?.outputStream ?: throw IOException("Bluetooth socket not connected")
         val sizeBytes = ByteArray(4)
         sizeBytes[0] = (textData.size shr 24).toByte()
         sizeBytes[1] = (textData.size shr 16).toByte()
         sizeBytes[2] = (textData.size shr 8).toByte()
         sizeBytes[3] = textData.size.toByte()
-        
-        bluetoothSocket?.outputStream?.write(sizeBytes)
-        bluetoothSocket?.outputStream?.write(textData)
-        bluetoothSocket?.outputStream?.flush()
+        try { Log.d(TAG, "Data send length=" + textData.size + " via=bluetooth") } catch (_: Exception) {}
+        out.write(sizeBytes)
+        out.write(textData)
+        out.flush()
+        try { Log.d(TAG, "Data send done") } catch (_: Exception) {}
     }
 
-    private fun receiveBluetoothText(): ByteArray {
-        // Read text size first
+    private fun receiveTextOverCurrentStream(): ByteArray {
+        val input = bluetoothSocket?.inputStream ?: throw IOException("Bluetooth socket not connected")
         val sizeBuffer = ByteArray(4)
-        bluetoothSocket?.inputStream?.read(sizeBuffer)
+        var read = 0
+        while (read < 4) {
+            val r = input.read(sizeBuffer, read, 4 - read)
+            if (r == -1) throw IOException("Connection closed while reading text size")
+            read += r
+        }
         val textSize = ((sizeBuffer[0].toInt() and 0xFF) shl 24) or
                       ((sizeBuffer[1].toInt() and 0xFF) shl 16) or
                       ((sizeBuffer[2].toInt() and 0xFF) shl 8) or
                       (sizeBuffer[3].toInt() and 0xFF)
-        
-        // Read text data
+        try { Log.d(TAG, "Data recv length=" + textSize + " via=bluetooth") } catch (_: Exception) {}
         val textData = ByteArray(textSize)
         var totalRead = 0
         while (totalRead < textSize) {
-            val bytesRead = bluetoothSocket?.inputStream?.read(textData, totalRead, textSize - totalRead) ?: 0
-            totalRead += bytesRead
+            val r = input.read(textData, totalRead, textSize - totalRead)
+            if (r == -1) throw IOException("Connection closed while reading text data")
+            totalRead += r
         }
-        
+        try { Log.d(TAG, "Data recv done") } catch (_: Exception) {}
         return textData
     }
+
+    
+
+    
+
+    
+
+    
+
+    
+
+    
+
+    
+
+    
+
+    
+
+    
+
+    
 
     private fun encryptInputText(): ByteArray {
         return try {
@@ -755,7 +804,7 @@ class SecureShareBluetoothTextActivity : AppCompatActivity() {
             }
             
             // Write encrypted data to temp file
-            val outputDir = defaultOutputDir ?: File("/storage/emulated/0/Documents/PQrypt")
+            val outputDir = cacheDir
             if (!outputDir.exists()) {
                 outputDir.mkdirs()
             }
@@ -824,6 +873,7 @@ class SecureShareBluetoothTextActivity : AppCompatActivity() {
             }
         }
         tempTextFile?.delete()
+        try { Log.d(TAG, "Activity destroyed; resources closed") } catch (_: Exception) {}
     }
 
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
@@ -839,65 +889,33 @@ class SecureShareBluetoothTextActivity : AppCompatActivity() {
     
     private fun cleanupIntermediateFiles() {
         try {
-            val outputDir = File("/storage/emulated/0/Documents/PQrypt")
-            if (outputDir.exists()) {
-                // Delete all .key files
-                outputDir.listFiles { _, name -> name.endsWith(".key") }?.forEach { it.delete() }
-                // Delete all .txt files created during text sharing
-                outputDir.listFiles { _, name -> name.startsWith("share_") && name.endsWith(".txt") }?.forEach { it.delete() }
-                // Delete temporary files
-                outputDir.listFiles { _, name -> name.startsWith("temp_") && name.endsWith(".txt") }?.forEach { it.delete() }
-            }
-            
-            // Also clean cache directory
-            cacheDir.listFiles { _, name -> 
-                name.endsWith(".key") || name.endsWith(".tmp") || 
+            cacheDir.listFiles { _, name ->
+                name.endsWith(".key") || name.endsWith(".tmp") ||
                 (name.startsWith("share_") && name.endsWith(".txt")) ||
                 (name.startsWith("temp_") && name.endsWith(".txt"))
             }?.forEach { it.delete() }
-            
         } catch (e: Exception) {
-            // Silent cleanup failure - don't bother user
         }
     }
     
     private fun showError(message: String) {
-        binding.tvStatus.text = "Error: $message"
-        Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
+        runOnUiThread {
+            binding.tvStatus.text = "Error: $message"
+            Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
+        }
+        try { Log.e(TAG, message) } catch (_: Exception) {}
     }
     
     private fun showSuccess(message: String) {
-        binding.tvStatus.text = message
-        Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
+        runOnUiThread {
+            binding.tvStatus.text = message
+            Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
+        }
+        try { Log.d(TAG, message) } catch (_: Exception) {}
     }
     
     private fun openOutputFolder() {
-        try {
-            val outputDir = File("/storage/emulated/0/Documents/pqrypt")
-            if (!outputDir.exists()) {
-                outputDir.mkdirs()
-            }
-            
-            val intent = Intent(Intent.ACTION_VIEW)
-            intent.setDataAndType(android.net.Uri.fromFile(outputDir), "resource/folder")
-            intent.flags = Intent.FLAG_ACTIVITY_NEW_TASK
-            
-            try {
-                startActivity(intent)
-            } catch (e: Exception) {
-                // Fallback: use file manager intent
-                val fileManagerIntent = Intent(Intent.ACTION_VIEW)
-                fileManagerIntent.data = android.net.Uri.parse("content://com.android.externalstorage.documents/document/primary%3ADocuments%2Fpqrypt")
-                fileManagerIntent.type = "vnd.android.document/directory"
-                try {
-                    startActivity(fileManagerIntent)
-                } catch (e2: Exception) {
-                    Toast.makeText(this, "Files saved to: ${outputDir.absolutePath}", Toast.LENGTH_LONG).show()
-                }
-            }
-        } catch (e: Exception) {
-            Toast.makeText(this, "Files are saved to: /storage/emulated/0/Documents/PQrypt/", Toast.LENGTH_LONG).show()
-        }
+        Toast.makeText(this, "Text is displayed on screen; no files saved.", Toast.LENGTH_LONG).show()
     }
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
@@ -917,4 +935,22 @@ class SecureShareBluetoothTextActivity : AppCompatActivity() {
             }
         }
     }
+
+private fun isLocationEnabled(): Boolean {
+    val lm = getSystemService(Context.LOCATION_SERVICE) as LocationManager
+    return lm.isProviderEnabled(LocationManager.GPS_PROVIDER) || lm.isProviderEnabled(LocationManager.NETWORK_PROVIDER)
+}
+
+private fun ensureLocationEnabledOrPrompt(): Boolean {
+    if (isLocationEnabled()) return true
+    AlertDialog.Builder(this)
+        .setTitle("Location required")
+        .setMessage("Enable Location to improve Bluetooth discovery and pairing.")
+        .setPositiveButton("Open Settings") { _, _ ->
+            startActivity(Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS))
+        }
+        .setNegativeButton("Cancel", null)
+        .show()
+    return false
+}
 }

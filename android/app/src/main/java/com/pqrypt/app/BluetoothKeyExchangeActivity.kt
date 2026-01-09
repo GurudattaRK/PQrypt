@@ -18,6 +18,9 @@ import android.os.Handler
 import android.os.Looper
 import android.view.View
 import android.widget.Toast
+import android.location.LocationManager
+import android.provider.Settings
+import androidx.appcompat.app.AlertDialog
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
@@ -73,6 +76,23 @@ class BluetoothKeyExchangeActivity : AppCompatActivity() {
             Toast.makeText(this, "Bluetooth is required for this feature", Toast.LENGTH_SHORT).show()
         }
     }
+
+    private fun isLocationEnabled(): Boolean {
+    val lm = getSystemService(Context.LOCATION_SERVICE) as LocationManager
+    return lm.isProviderEnabled(LocationManager.GPS_PROVIDER) || lm.isProviderEnabled(LocationManager.NETWORK_PROVIDER)
+}
+    private fun ensureLocationEnabledOrPrompt(): Boolean {
+        if (isLocationEnabled()) return true
+        AlertDialog.Builder(this)
+            .setTitle("Location required")
+            .setMessage("Enable Location to improve Bluetooth discovery and pairing.")
+            .setPositiveButton("Open Settings") { _, _ ->
+                startActivity(Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS))
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+        return false
+}
 
     private val discoverableLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
@@ -138,6 +158,7 @@ class BluetoothKeyExchangeActivity : AppCompatActivity() {
         setupUI()
         setupRecyclerView()
         requestPermissions()
+        ensureLocationEnabledOrPrompt()
         
         // Load saved output folder
         val savedFolder = getSharedPreferences("pqrypt_prefs", MODE_PRIVATE)
@@ -312,6 +333,9 @@ class BluetoothKeyExchangeActivity : AppCompatActivity() {
     }
 
     private fun scanForDevices() {
+
+        if (!ensureLocationEnabledOrPrompt()) return
+
         if (ActivityCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_SCAN) != PackageManager.PERMISSION_GRANTED) {
             Toast.makeText(this, "Bluetooth scan permission required", Toast.LENGTH_SHORT).show()
             return
@@ -392,26 +416,19 @@ class BluetoothKeyExchangeActivity : AppCompatActivity() {
                 // Check if device is paired, if not try to pair first
                 if (device.bondState != BluetoothDevice.BOND_BONDED) {
                     withContext(Dispatchers.Main) {
+                        binding.tvConnectionStatus.text = "Pairing... confirm on both devices"
                         Toast.makeText(this@BluetoothKeyExchangeActivity, "Pairing with device...", Toast.LENGTH_SHORT).show()
                     }
-                    
-                    // Attempt to pair
-                    val paired = device.createBond()
-                    if (!paired) {
-                        throw IOException("Failed to initiate pairing with device")
-                    }
-                    
-                    // Wait for pairing to complete (simplified approach)
+                    val started = device.createBond()
+                    if (!started) throw IOException("Failed to initiate pairing with device")
                     var attempts = 0
-                    while (device.bondState == BluetoothDevice.BOND_BONDING && attempts < 30) {
-                        Thread.sleep(1000)
+                    while (device.bondState == BluetoothDevice.BOND_BONDING && attempts < 120) {
+                        delay(1000)
                         attempts++
                     }
-                    
-                    if (device.bondState != BluetoothDevice.BOND_BONDED) {
-                        throw IOException("Device pairing failed or timed out")
-                    }
+                    if (device.bondState != BluetoothDevice.BOND_BONDED) throw IOException("Device pairing failed or timed out")
                 }
+
                 
                 // Try multiple connection methods for better compatibility
                 var socket: BluetoothSocket? = null
@@ -552,42 +569,23 @@ class BluetoothKeyExchangeActivity : AppCompatActivity() {
         val socket = bluetoothSocket ?: return
         val outputStream = socket.outputStream
         val inputStream = socket.inputStream
-
         try {
-            withContext(Dispatchers.Main) {
-                binding.tvConnectionStatus.text = "Step 1: Generating initial keys..."
-            }
-
-            // Step 1: Generate 1.key (hybrid1Key)
-            val result1 = RustyCrypto.hybridSenderInit() as Array<*>
-            hybrid1Key = result1[0] as ByteArray
-            senderState = result1[1] as ByteArray
-
-            // Send 1.key to receiver
+            withContext(Dispatchers.Main) { binding.tvConnectionStatus.text = "Step 1: Generating initial keys..." }
+            val package1 = RustyCrypto.hybridSenderInit()
+            hybrid1Key = package1
             sendData(outputStream, hybrid1Key!!)
-
-            withContext(Dispatchers.Main) {
-                binding.tvConnectionStatus.text = "Step 2: Waiting for receiver response..."
-            }
-
-            // Step 2: Receive 2.key from receiver
+            withContext(Dispatchers.Main) { binding.tvConnectionStatus.text = "Step 2: Waiting for receiver response (2.key)..." }
             hybrid2Key = receiveData(inputStream)
-
-            withContext(Dispatchers.Main) {
-                binding.tvConnectionStatus.text = "Step 3: Generating final keys..."
-            }
-
-            // Step 3: Generate final secret from package2
-            finalSharedSecret = RustyCrypto.hybridSenderFinal(hybrid2Key!!)
-
-            // Save final.key
+            withContext(Dispatchers.Main) { binding.tvConnectionStatus.text = "Step 3: Completing exchange..." }
+            val third = RustyCrypto.hybridSenderThird(hybrid2Key!!) as Array<*>
+            hybrid3Key = third[0] as ByteArray
+            finalSharedSecret = third[1] as ByteArray
+            sendData(outputStream, hybrid3Key!!)
             saveFinalKey()
-
             withContext(Dispatchers.Main) {
                 binding.tvConnectionStatus.text = "Key exchange completed successfully!"
                 Toast.makeText(this@BluetoothKeyExchangeActivity, "Final key saved successfully", Toast.LENGTH_LONG).show()
             }
-
         } catch (e: Exception) {
             throw e
         }
@@ -597,39 +595,21 @@ class BluetoothKeyExchangeActivity : AppCompatActivity() {
         val socket = bluetoothSocket ?: return
         val outputStream = socket.outputStream
         val inputStream = socket.inputStream
-
         try {
-            withContext(Dispatchers.Main) {
-                binding.tvConnectionStatus.text = "Step 1: Waiting for sender's key..."
-            }
-
-            // Step 1: Receive 1.key from sender
+            withContext(Dispatchers.Main) { binding.tvConnectionStatus.text = "Step 1: Waiting for sender's key (1.key)..." }
             hybrid1Key = receiveData(inputStream)
-
-            withContext(Dispatchers.Main) {
-                binding.tvConnectionStatus.text = "Step 2: Generating response..."
-            }
-
-            // Step 2: Generate 2.key response and get final key
-            val result1 = RustyCrypto.hybridReceiver(hybrid1Key!!) as Array<*>
-            hybrid2Key = result1[0] as ByteArray
-            finalSharedSecret = result1[1] as ByteArray
-
-            // Send 2.key to sender
+            withContext(Dispatchers.Main) { binding.tvConnectionStatus.text = "Step 2: Generating response (2.key)..." }
+            val package2Bundle = RustyCrypto.hybridReceiverDual(hybrid1Key!!)
+            hybrid2Key = package2Bundle
             sendData(outputStream, hybrid2Key!!)
-
-            withContext(Dispatchers.Main) {
-                binding.tvConnectionStatus.text = "Step 3: Completing exchange..."
-            }
-
-            // Save final.key
+            withContext(Dispatchers.Main) { binding.tvConnectionStatus.text = "Step 3: Waiting for sender's final (3.key)..." }
+            hybrid3Key = receiveData(inputStream)
+            finalSharedSecret = RustyCrypto.hybridReceiverFinalDual(hybrid3Key!!)
             saveFinalKey()
-
             withContext(Dispatchers.Main) {
                 binding.tvConnectionStatus.text = "Key exchange completed successfully!"
                 Toast.makeText(this@BluetoothKeyExchangeActivity, "Final key saved successfully", Toast.LENGTH_LONG).show()
             }
-
         } catch (e: Exception) {
             throw e
         }

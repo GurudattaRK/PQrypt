@@ -314,6 +314,21 @@ class SecureShareManualFileActivity : AppCompatActivity() {
 
         lifecycleScope.launch(Dispatchers.IO) {
             try {
+                withContext(Dispatchers.Main) {
+                    if (pickedFolderUri == null) {
+                        binding.tvStatus.text = "Select destination folder before encryption"
+                        launchPickFolder()
+                    }
+                }
+                var attempts = 0
+                while (pickedFolderUri == null && attempts < 120) {
+                    kotlinx.coroutines.delay(1000)
+                    attempts++
+                }
+                if (pickedFolderUri == null) {
+                    withContext(Dispatchers.Main) { showError("No destination folder selected") }
+                    return@launch
+                }
                 val inputPath = getRealPathFromUri(selectedFileUri!!)
                 if (inputPath == null) {
                     withContext(Dispatchers.Main) {
@@ -371,6 +386,21 @@ class SecureShareManualFileActivity : AppCompatActivity() {
     private fun performFileDecryption(uri: Uri) {
         lifecycleScope.launch(Dispatchers.IO) {
             try {
+                withContext(Dispatchers.Main) {
+                    if (pickedFolderUri == null) {
+                        binding.tvStatus.text = "Select destination folder before decryption"
+                        launchPickFolder()
+                    }
+                }
+                var attempts = 0
+                while (pickedFolderUri == null && attempts < 120) {
+                    kotlinx.coroutines.delay(1000)
+                    attempts++
+                }
+                if (pickedFolderUri == null) {
+                    withContext(Dispatchers.Main) { showError("No destination folder selected") }
+                    return@launch
+                }
                 val inputPath = getRealPathFromUri(uri)
                 if (inputPath == null) {
                     withContext(Dispatchers.Main) {
