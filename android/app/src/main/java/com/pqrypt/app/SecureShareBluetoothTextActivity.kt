@@ -33,7 +33,13 @@ import java.util.*
 import android.location.LocationManager
 import android.provider.Settings
 import androidx.appcompat.app.AlertDialog
+import android.os.Looper
 import android.util.Log
+import android.net.wifi.p2p.WifiP2pManager
+import android.net.wifi.p2p.WifiP2pDevice
+import android.net.wifi.p2p.WifiP2pConfig
+import android.net.wifi.p2p.WifiP2pInfo
+import android.net.wifi.WpsInfo
 
 class SecureShareBluetoothTextActivity : AppCompatActivity() {
 
@@ -53,6 +59,11 @@ class SecureShareBluetoothTextActivity : AppCompatActivity() {
     private var selectedDevice: BluetoothDevice? = null
     private var bluetoothSocket: BluetoothSocket? = null
     private var serverSocket: BluetoothServerSocket? = null
+    private var wifiP2pManager: WifiP2pManager? = null
+    private var wifiChannel: WifiP2pManager.Channel? = null
+    private var isWifiDirectActive: Boolean = false
+    private var tcpServerSocket: java.net.ServerSocket? = null
+    private var networkSocket: java.net.Socket? = null
     
     // PQC Key exchange data
     private var senderState: Any? = null
@@ -101,6 +112,7 @@ class SecureShareBluetoothTextActivity : AppCompatActivity() {
         private const val REQUEST_ENABLE_BT = 1
         private const val REQUEST_DISCOVERABLE_BT = 2
         private const val PERMISSIONS_REQUEST_CODE = 100
+        private const val WIFI_PORT = 8988
         private const val TAG = "PQrypt"
     }
 
@@ -120,9 +132,7 @@ class SecureShareBluetoothTextActivity : AppCompatActivity() {
         setupUI()
         setupDefaultOutputLocation()
         checkPermissions()  // Check permissions before setting up Bluetooth
-        ensureLocationEnabledOrPrompt()
         updateUI()
-        try { Log.d(TAG, "TextActivity onCreate role=" + role + " isSender=" + isSender + " transferMode=" + transferMode + " contentType=" + contentType) } catch (_: Exception) {}
     }
     
     private fun setupDefaultOutputLocation() {
@@ -134,14 +144,12 @@ class SecureShareBluetoothTextActivity : AppCompatActivity() {
             if (!defaultOutputDir!!.exists()) {
                 defaultOutputDir!!.mkdirs()
             }
-            try { Log.d(TAG, "Default output dir=" + defaultOutputDir!!.absolutePath) } catch (_: Exception) {}
         } catch (e: Exception) {
             // Fallback to the same default path, not app-specific directory
             defaultOutputDir = File("/storage/emulated/0/Documents/PQrypt")
             if (!defaultOutputDir!!.exists()) {
                 defaultOutputDir!!.mkdirs()
             }
-            try { Log.e(TAG, "Default output dir fallback due to: " + e.message) } catch (_: Exception) {}
         }
     }
 
@@ -211,9 +219,6 @@ class SecureShareBluetoothTextActivity : AppCompatActivity() {
         if (!bluetoothAdapter!!.isEnabled) {
             val enableBtIntent = Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE)
             bluetoothEnableLauncher.launch(enableBtIntent)
-            try { Log.d(TAG, "Requested Bluetooth enable") } catch (_: Exception) {}
-        } else {
-            try { Log.d(TAG, "Bluetooth already enabled") } catch (_: Exception) {}
         }
     }
 
@@ -249,7 +254,11 @@ class SecureShareBluetoothTextActivity : AppCompatActivity() {
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
             permissions.add(Manifest.permission.ACCESS_COARSE_LOCATION)
         }
-        // No NEARBY_WIFI_DEVICES permission needed for Text flow (Bluetooth only)
+        if (android.os.Build.VERSION.SDK_INT >= 33) {
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.NEARBY_WIFI_DEVICES) != PackageManager.PERMISSION_GRANTED) {
+                permissions.add(Manifest.permission.NEARBY_WIFI_DEVICES)
+            }
+        }
 
         if (permissions.isNotEmpty()) {
             ActivityCompat.requestPermissions(this, permissions.toTypedArray(), PERMISSIONS_REQUEST_CODE)
@@ -274,7 +283,6 @@ class SecureShareBluetoothTextActivity : AppCompatActivity() {
             addAction(BluetoothAdapter.ACTION_DISCOVERY_FINISHED)
         }
         registerReceiver(discoveryReceiver, filter)
-        try { Log.d(TAG, "Permissions granted; discovery receiver registered") } catch (_: Exception) {}
     }
 
     private fun updateUI() {
@@ -321,13 +329,11 @@ class SecureShareBluetoothTextActivity : AppCompatActivity() {
                 }
                 registerReceiver(discoveryReceiver, filter)
                 isDiscoveryReceiverRegistered = true
-                try { Log.d(TAG, "Registered discovery receiver dynamically") } catch (_: Exception) {}
             }
 
             // Cancel any ongoing discovery first
             if (adapter.isDiscovering) {
                 adapter.cancelDiscovery()
-                try { Log.d(TAG, "Canceled ongoing discovery before restart") } catch (_: Exception) {}
             }
 
             discoveredDevices.clear()
@@ -341,7 +347,6 @@ class SecureShareBluetoothTextActivity : AppCompatActivity() {
                         deviceAdapter?.notifyItemInserted(discoveredDevices.size - 1)
                     }
                 }
-                try { Log.d(TAG, "Paired devices added count=" + discoveredDevices.size) } catch (_: Exception) {}
             }
             
             // Start discovery for new devices
@@ -351,7 +356,6 @@ class SecureShareBluetoothTextActivity : AppCompatActivity() {
             } else {
                 binding.tvStatus.text = "Scanning for devices... Found ${discoveredDevices.size} paired devices"
                 binding.rvDevices.visibility = View.VISIBLE
-                try { Log.d(TAG, "Discovery started; initial count=" + discoveredDevices.size) } catch (_: Exception) {}
             }
         }
     }
@@ -371,7 +375,6 @@ class SecureShareBluetoothTextActivity : AppCompatActivity() {
             
             lifecycleScope.launch(Dispatchers.IO) {
                 try {
-                    try { Log.d(TAG, "Receiver: starting RFCOMM server socket") } catch (_: Exception) {}
                     serverSocket = adapter.listenUsingRfcommWithServiceRecord("PQryptSecureTextShare", MY_UUID)
                     
                     withContext(Dispatchers.Main) {
@@ -386,21 +389,18 @@ class SecureShareBluetoothTextActivity : AppCompatActivity() {
                     }
     
                     // Accept incoming connection (this blocks until connection is made)
-                    try { Log.d(TAG, "Receiver: waiting for RFCOMM accept()") } catch (_: Exception) {}
                     val socket = serverSocket?.accept()
                     socket?.let {
                         withContext(Dispatchers.Main) {
                             bluetoothSocket = it
                             binding.tvConnectionStatus.text = "Connected to ${it.remoteDevice.name ?: it.remoteDevice.address}"
                             showSuccess("Incoming Bluetooth connection accepted")
-                            try { Log.d(TAG, "Receiver: accepted RFCOMM from=" + (it.remoteDevice.name ?: it.remoteDevice.address)) } catch (_: Exception) {}
                             startKeyExchangeAsReceiver()
                         }
                     }
                 } catch (e: IOException) {
                     withContext(Dispatchers.Main) {
                         showError("Failed to start listening: ${e.message}")
-                        try { Log.e(TAG, "Receiver: listen/accept failed: " + e.message) } catch (_: Exception) {}
                     }
                 }
             }
@@ -416,20 +416,17 @@ class SecureShareBluetoothTextActivity : AppCompatActivity() {
         selectedDevice = device
         binding.tvConnectionStatus.text = "Connecting to ${device.name ?: device.address}..."
         binding.tvStatus.text = "Establishing connection..."
-        try { Log.d(TAG, "Sender: connectToDevice name=" + (device.name ?: "?") + " addr=" + device.address) } catch (_: Exception) {}
 
         lifecycleScope.launch(Dispatchers.IO) {
             try {
                 // Cancel discovery to improve connection performance
                 bluetoothAdapter?.cancelDiscovery()
-                try { Log.d(TAG, "Sender: canceled discovery before connecting") } catch (_: Exception) {}
                 
                 // Check if device is paired, if not try to pair first
                 if (device.bondState != BluetoothDevice.BOND_BONDED) {
                     withContext(Dispatchers.Main) {
                         showSuccess("Pairing with device...")
                     }
-                    try { Log.d(TAG, "Sender: initiating pairing") } catch (_: Exception) {}
                     
                     // Attempt to pair
                     val paired = device.createBond()
@@ -447,7 +444,6 @@ class SecureShareBluetoothTextActivity : AppCompatActivity() {
                     if (device.bondState != BluetoothDevice.BOND_BONDED) {
                         throw IOException("Device pairing failed or timed out")
                     }
-                    try { Log.d(TAG, "Sender: pairing complete") } catch (_: Exception) {}
                 }
                 
                 // Try multiple connection methods for better compatibility
@@ -456,39 +452,31 @@ class SecureShareBluetoothTextActivity : AppCompatActivity() {
                 
                 // Add delay to ensure the target device is ready
                 Thread.sleep(2000)
-                try { Log.d(TAG, "Sender: attempting RFCOMM method 1") } catch (_: Exception) {}
                 
                 // Method 1: Standard RFCOMM connection
                 try {
                     socket = device.createRfcommSocketToServiceRecord(MY_UUID)
                     socket.connect()
                     connected = true
-                    try { Log.d(TAG, "Sender: RFCOMM method 1 success") } catch (_: Exception) {}
                 } catch (e: IOException) {
                     socket?.close()
-                    try { Log.e(TAG, "Sender: RFCOMM method 1 failed: " + e.message) } catch (_: Exception) {}
                     
                     // Method 2: Fallback using reflection for older devices
                     try {
-                        try { Log.d(TAG, "Sender: attempting RFCOMM method 2 (reflection)") } catch (_: Exception) {}
                         val method = device.javaClass.getMethod("createRfcommSocket", Int::class.javaPrimitiveType)
                         socket = method.invoke(device, 1) as BluetoothSocket
                         socket.connect()
                         connected = true
-                        try { Log.d(TAG, "Sender: RFCOMM method 2 success") } catch (_: Exception) {}
                     } catch (e2: Exception) {
                         socket?.close()
-                        try { Log.e(TAG, "Sender: RFCOMM method 2 failed: " + e2.message) } catch (_: Exception) {}
                         
                         // Method 3: Try different RFCOMM channels
-                        try { Log.d(TAG, "Sender: attempting RFCOMM method 3 (channels 1..30)") } catch (_: Exception) {}
                         for (channel in 1..30) {
                             try {
                                 val method = device.javaClass.getMethod("createRfcommSocket", Int::class.javaPrimitiveType)
                                 socket = method.invoke(device, channel) as BluetoothSocket
                                 socket.connect()
                                 connected = true
-                                try { Log.d(TAG, "Sender: RFCOMM method 3 success on channel=" + channel) } catch (_: Exception) {}
                                 break
                             } catch (e3: Exception) {
                                 socket?.close()
@@ -506,7 +494,6 @@ class SecureShareBluetoothTextActivity : AppCompatActivity() {
                     withContext(Dispatchers.Main) {
                         binding.tvConnectionStatus.text = "Connected to ${device.name ?: device.address}"
                         showSuccess("Bluetooth connection established")
-                        try { Log.d(TAG, "Sender: RFCOMM connected to=" + (device.name ?: device.address)) } catch (_: Exception) {}
                         startKeyExchangeAsSender()
                     }
                 }
@@ -515,7 +502,6 @@ class SecureShareBluetoothTextActivity : AppCompatActivity() {
                     showError("Connection failed: ${e.message}")
                     bluetoothSocket?.close()
                     bluetoothSocket = null
-                    try { Log.e(TAG, "Sender: connection failed: " + e.message) } catch (_: Exception) {}
                 }
             }
         }
@@ -561,20 +547,16 @@ class SecureShareBluetoothTextActivity : AppCompatActivity() {
             binding.tvProgressTitle.text = "Performing Key Exchange..."
             binding.progressBar.progress = 10
         }
-        try { Log.d(TAG, "SenderFlow: start") } catch (_: Exception) {}
 
         val package1 = RustyCrypto.hybridSenderInit()
-        try { Log.d(TAG, "SenderFlow: sending package1 size=" + package1.size) } catch (_: Exception) {}
         sendBluetoothData(package1)
 
         withContext(Dispatchers.Main) { binding.progressBar.progress = 30 }
 
         val package2Bundle = receiveBluetoothData()
-        try { Log.d(TAG, "SenderFlow: received package2 size=" + package2Bundle.size) } catch (_: Exception) {}
         val third = RustyCrypto.hybridSenderThird(package2Bundle) as Array<*>
         val package3 = third[0] as ByteArray
         finalSharedSecret = third[1] as ByteArray
-        try { Log.d(TAG, "SenderFlow: sending package3 size=" + package3.size + ", sharedSecret set=" + (finalSharedSecret != null)) } catch (_: Exception) {}
         sendBluetoothData(package3)
 
         withContext(Dispatchers.Main) {
@@ -584,12 +566,23 @@ class SecureShareBluetoothTextActivity : AppCompatActivity() {
 
         val encryptedTextData = encryptInputText()
         if (encryptedTextData.isEmpty()) throw Exception("Failed to encrypt text")
-        try { Log.d(TAG, "SenderFlow: encrypted text bytes=" + encryptedTextData.size) } catch (_: Exception) {}
 
-        // Use Bluetooth transport for text data (no Wi‑Fi Direct)
-        try { Log.d(TAG, "SenderFlow: using Bluetooth transport for text") } catch (_: Exception) {}
+        // Propose Wi‑Fi Direct for data path
+        sendBluetoothData("USE_WIFI".toByteArray(Charsets.UTF_8))
+        val wifiResp = String(receiveBluetoothData(), Charsets.UTF_8)
+        var wifiOk = false
+        if (wifiResp == "WIFI_READY") {
+            wifiOk = tryStartWifiDirectSender()
+            if (!wifiOk) {
+                sendBluetoothData("USE_BT".toByteArray(Charsets.UTF_8))
+            }
+        }
+        if (wifiOk) {
+            showSuccess("Wi‑Fi Direct connected for text transfer")
+        } else {
+            showError("Using Bluetooth for text transfer")
+        }
         sendTextOverCurrentStream(encryptedTextData)
-        try { Log.d(TAG, "SenderFlow: text sent over=bluetooth") } catch (_: Exception) {}
 
         withContext(Dispatchers.Main) {
             binding.progressBar.progress = 100
@@ -597,7 +590,6 @@ class SecureShareBluetoothTextActivity : AppCompatActivity() {
             showSuccess("Text encrypted and sent successfully!")
             cleanupIntermediateFiles()
         }
-        try { Log.d(TAG, "SenderFlow: done") } catch (_: Exception) {}
     }
 
     private suspend fun performReceiverFlow() {
@@ -606,30 +598,35 @@ class SecureShareBluetoothTextActivity : AppCompatActivity() {
             binding.tvProgressTitle.text = "Performing Key Exchange..."
             binding.progressBar.progress = 10
         }
-        try { Log.d(TAG, "ReceiverFlow: start") } catch (_: Exception) {}
 
         val package1 = receiveBluetoothData()
-        try { Log.d(TAG, "ReceiverFlow: received package1 size=" + package1.size) } catch (_: Exception) {}
         val package2Bundle = RustyCrypto.hybridReceiverDual(package1)
-        try { Log.d(TAG, "ReceiverFlow: sending package2 size=" + package2Bundle.size) } catch (_: Exception) {}
         sendBluetoothData(package2Bundle)
 
         withContext(Dispatchers.Main) { binding.progressBar.progress = 40 }
 
         val package3 = receiveBluetoothData()
-        try { Log.d(TAG, "ReceiverFlow: received package3 size=" + package3.size) } catch (_: Exception) {}
         finalSharedSecret = RustyCrypto.hybridReceiverFinalDual(package3)
-        try { Log.d(TAG, "ReceiverFlow: finalSharedSecret set=" + (finalSharedSecret != null)) } catch (_: Exception) {}
 
         withContext(Dispatchers.Main) {
             binding.progressBar.progress = 60
             binding.tvProgressTitle.text = "Receiving and Decrypting Text..."
         }
 
-        // Use Bluetooth transport for text data (no Wi‑Fi Direct)
-        try { Log.d(TAG, "ReceiverFlow: using Bluetooth transport for text") } catch (_: Exception) {}
+        // Check if sender requested Wi‑Fi Direct
+        val req = String(receiveBluetoothData(), Charsets.UTF_8)
+        var wifiOk = false
+        if (req == "USE_WIFI") {
+            wifiOk = tryStartWifiDirectReceiver()
+            if (wifiOk) {
+                sendBluetoothData("WIFI_READY".toByteArray(Charsets.UTF_8))
+                waitForNetworkSocket(30000)
+            } else {
+                sendBluetoothData("WIFI_FAIL".toByteArray(Charsets.UTF_8))
+            }
+        }
+
         val encryptedTextData = receiveTextOverCurrentStream()
-        try { Log.d(TAG, "ReceiverFlow: received text bytes=" + encryptedTextData.size + " over=bluetooth") } catch (_: Exception) {}
         if (encryptedTextData.isEmpty()) throw Exception("Failed to receive encrypted text data")
         val decryptedText = decryptReceivedText(encryptedTextData)
 
@@ -640,7 +637,6 @@ class SecureShareBluetoothTextActivity : AppCompatActivity() {
             showSuccess("Text received and decrypted successfully!")
             cleanupIntermediateFiles()
         }
-        try { Log.d(TAG, "ReceiverFlow: done") } catch (_: Exception) {}
     }
 
     private fun sendBluetoothData(data: ByteArray?) {
@@ -656,13 +652,11 @@ class SecureShareBluetoothTextActivity : AppCompatActivity() {
         lengthBytes[1] = (data.size shr 16).toByte()
         lengthBytes[2] = (data.size shr 8).toByte()
         lengthBytes[3] = data.size.toByte()
-        try { Log.d(TAG, "BT send length=" + data.size) } catch (_: Exception) {}
         outputStream.write(lengthBytes)
         
         // Send data
         outputStream.write(data)
         outputStream.flush()
-        try { Log.d(TAG, "BT send done") } catch (_: Exception) {}
     }
 
     private fun receiveBluetoothData(): ByteArray {
@@ -685,7 +679,6 @@ class SecureShareBluetoothTextActivity : AppCompatActivity() {
         if (length <= 0 || length > 1024 * 1024) { // Max 1MB for safety
             throw IOException("Invalid data length: $length")
         }
-        try { Log.d(TAG, "BT recv length=" + length) } catch (_: Exception) {}
         
         // Read data
         val data = ByteArray(length)
@@ -696,26 +689,24 @@ class SecureShareBluetoothTextActivity : AppCompatActivity() {
             totalRead += read
         }
         
-        try { Log.d(TAG, "BT recv done") } catch (_: Exception) {}
         return data
     }
 
     private fun sendTextOverCurrentStream(textData: ByteArray) {
-        val out = bluetoothSocket?.outputStream ?: throw IOException("Bluetooth socket not connected")
+        val out = currentOutputStream()
         val sizeBytes = ByteArray(4)
         sizeBytes[0] = (textData.size shr 24).toByte()
         sizeBytes[1] = (textData.size shr 16).toByte()
         sizeBytes[2] = (textData.size shr 8).toByte()
         sizeBytes[3] = textData.size.toByte()
-        try { Log.d(TAG, "Data send length=" + textData.size + " via=bluetooth") } catch (_: Exception) {}
         out.write(sizeBytes)
         out.write(textData)
         out.flush()
-        try { Log.d(TAG, "Data send done") } catch (_: Exception) {}
+        Log.d(TAG, "TX ${textData.size} bytes (text)")
     }
 
     private fun receiveTextOverCurrentStream(): ByteArray {
-        val input = bluetoothSocket?.inputStream ?: throw IOException("Bluetooth socket not connected")
+        val input = currentInputStream()
         val sizeBuffer = ByteArray(4)
         var read = 0
         while (read < 4) {
@@ -727,7 +718,6 @@ class SecureShareBluetoothTextActivity : AppCompatActivity() {
                       ((sizeBuffer[1].toInt() and 0xFF) shl 16) or
                       ((sizeBuffer[2].toInt() and 0xFF) shl 8) or
                       (sizeBuffer[3].toInt() and 0xFF)
-        try { Log.d(TAG, "Data recv length=" + textSize + " via=bluetooth") } catch (_: Exception) {}
         val textData = ByteArray(textSize)
         var totalRead = 0
         while (totalRead < textSize) {
@@ -735,31 +725,108 @@ class SecureShareBluetoothTextActivity : AppCompatActivity() {
             if (r == -1) throw IOException("Connection closed while reading text data")
             totalRead += r
         }
-        try { Log.d(TAG, "Data recv done") } catch (_: Exception) {}
+        Log.d(TAG, "RX ${textData.size} bytes (text)")
         return textData
     }
 
-    
+    private fun currentInputStream(): InputStream {
+        networkSocket?.let { return it.getInputStream() }
+        return bluetoothSocket?.inputStream ?: throw IOException("No active transport")
+    }
 
-    
+    private fun currentOutputStream(): OutputStream {
+        networkSocket?.let { return it.getOutputStream() }
+        return bluetoothSocket?.outputStream ?: throw IOException("No active transport")
+    }
 
-    
+    private suspend fun tryStartWifiDirectReceiver(): Boolean {
+        return try {
+            wifiP2pManager = getSystemService(Context.WIFI_P2P_SERVICE) as WifiP2pManager
+            wifiChannel = wifiP2pManager?.initialize(this, Looper.getMainLooper(), null)
+            if (android.os.Build.VERSION.SDK_INT >= 33 && ContextCompat.checkSelfPermission(this, Manifest.permission.NEARBY_WIFI_DEVICES) != PackageManager.PERMISSION_GRANTED) {
+                false
+            } else {
+                val created = CompletableDeferred<Boolean>()
+                withContext(Dispatchers.Main) {
+                    wifiP2pManager?.createGroup(wifiChannel, object : WifiP2pManager.ActionListener {
+                        override fun onSuccess() { created.complete(true) }
+                        override fun onFailure(reason: Int) { created.complete(false) }
+                    })
+                }
+                val ok = withTimeoutOrNull(15000) { created.await() } ?: false
+                if (!ok) return false
+                tcpServerSocket = java.net.ServerSocket(WIFI_PORT)
+                val sock = withTimeoutOrNull(30000) { tcpServerSocket!!.accept() } ?: return false
+                networkSocket = sock
+                isWifiDirectActive = true
+                true
+            }
+        } catch (_: Exception) { false }
+    }
 
-    
+    private suspend fun tryStartWifiDirectSender(): Boolean {
+        return try {
+            wifiP2pManager = getSystemService(Context.WIFI_P2P_SERVICE) as WifiP2pManager
+            wifiChannel = wifiP2pManager?.initialize(this, Looper.getMainLooper(), null)
+            if (android.os.Build.VERSION.SDK_INT >= 33 && ContextCompat.checkSelfPermission(this, Manifest.permission.NEARBY_WIFI_DEVICES) != PackageManager.PERMISSION_GRANTED) {
+                false
+            } else {
+                val disc = CompletableDeferred<Boolean>()
+                withContext(Dispatchers.Main) {
+                    wifiP2pManager?.discoverPeers(wifiChannel, object : WifiP2pManager.ActionListener {
+                        override fun onSuccess() { disc.complete(true) }
+                        override fun onFailure(reason: Int) { disc.complete(false) }
+                    })
+                }
+                val started = withTimeoutOrNull(10000) { disc.await() } ?: false
+                if (!started) return false
+                delay(2000)
+                val peersDef = CompletableDeferred<Collection<WifiP2pDevice>>()
+                withContext(Dispatchers.Main) {
+                    wifiP2pManager?.requestPeers(wifiChannel) { list -> peersDef.complete(list.deviceList) }
+                }
+                val peers = withTimeoutOrNull(10000) { peersDef.await() } ?: emptyList()
+                if (peers.isEmpty()) return false
+                val device = peers.first()
+                val cfg = WifiP2pConfig().apply { deviceAddress = device.deviceAddress; wps.setup = WpsInfo.PBC }
+                val conn = CompletableDeferred<Boolean>()
+                withContext(Dispatchers.Main) { wifiP2pManager?.connect(wifiChannel, cfg, object : WifiP2pManager.ActionListener { override fun onSuccess() { conn.complete(true) } override fun onFailure(reason: Int) { conn.complete(false) } }) }
+                val connected = withTimeoutOrNull(20000) { conn.await() } ?: false
+                if (!connected) return false
+                var info: WifiP2pInfo? = null
+                val start = System.currentTimeMillis()
+                while (System.currentTimeMillis() - start < 30000) {
+                    val infoDef = CompletableDeferred<WifiP2pInfo>()
+                    withContext(Dispatchers.Main) { wifiP2pManager?.requestConnectionInfo(wifiChannel) { i -> infoDef.complete(i) } }
+                    info = withTimeoutOrNull(3000) { infoDef.await() }
+                    if (info != null && info!!.groupFormed) break
+                    delay(1000)
+                }
+                if (info == null || !info!!.groupFormed) return false
+                if (info!!.isGroupOwner) {
+                    tcpServerSocket = java.net.ServerSocket(WIFI_PORT)
+                    val sock = withTimeoutOrNull(30000) { tcpServerSocket!!.accept() } ?: return false
+                    networkSocket = sock
+                } else {
+                    val host = info!!.groupOwnerAddress.hostAddress
+                    val sock = java.net.Socket()
+                    sock.connect(java.net.InetSocketAddress(host, WIFI_PORT), 30000)
+                    networkSocket = sock
+                }
+                isWifiDirectActive = true
+                true
+            }
+        } catch (_: Exception) { false }
+    }
 
-    
-
-    
-
-    
-
-    
-
-    
-
-    
-
-    
+    private suspend fun waitForNetworkSocket(timeoutMs: Long): Boolean {
+        val start = System.currentTimeMillis()
+        while (System.currentTimeMillis() - start < timeoutMs) {
+            if (networkSocket != null) return true
+            delay(200)
+        }
+        return networkSocket != null
+    }
 
     private fun encryptInputText(): ByteArray {
         return try {
@@ -862,6 +929,9 @@ class SecureShareBluetoothTextActivity : AppCompatActivity() {
         super.onDestroy()
         bluetoothSocket?.close()
         serverSocket?.close()
+        try { tcpServerSocket?.close() } catch (_: Exception) {}
+        try { networkSocket?.close() } catch (_: Exception) {}
+        try { wifiP2pManager?.removeGroup(wifiChannel, null) } catch (_: Exception) {}
         
         // Unregister discovery receiver
         if (isDiscoveryReceiverRegistered) {
@@ -873,7 +943,6 @@ class SecureShareBluetoothTextActivity : AppCompatActivity() {
             }
         }
         tempTextFile?.delete()
-        try { Log.d(TAG, "Activity destroyed; resources closed") } catch (_: Exception) {}
     }
 
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
@@ -899,19 +968,13 @@ class SecureShareBluetoothTextActivity : AppCompatActivity() {
     }
     
     private fun showError(message: String) {
-        runOnUiThread {
-            binding.tvStatus.text = "Error: $message"
-            Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
-        }
-        try { Log.e(TAG, message) } catch (_: Exception) {}
+        binding.tvStatus.text = "Error: $message"
+        Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
     }
     
     private fun showSuccess(message: String) {
-        runOnUiThread {
-            binding.tvStatus.text = message
-            Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
-        }
-        try { Log.d(TAG, message) } catch (_: Exception) {}
+        binding.tvStatus.text = message
+        Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
     }
     
     private fun openOutputFolder() {

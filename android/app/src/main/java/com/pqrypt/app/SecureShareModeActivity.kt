@@ -2,6 +2,7 @@ package com.pqrypt.app
 
 import android.content.Intent
 import android.os.Bundle
+import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import com.pqrypt.app.databinding.ActivitySecureShareModeBinding
 
@@ -29,12 +30,22 @@ class SecureShareModeActivity : AppCompatActivity() {
 
         binding.btnContinue.setOnClickListener {
             val contentType = if (binding.rbText.isChecked) "text" else "file"
-            val transferMode = if (binding.rbManual.isChecked) "manual" else "bluetooth"
+            val transferMode = when {
+                binding.rbManual.isChecked -> "manual"
+                binding.rbBluetooth.isChecked -> "bluetooth"
+                else -> "wifi_direct"
+            }
             val role = if (binding.rbSender.isChecked) "sender" else "receiver"
+
+            if (transferMode == "wifi_direct" && contentType == "text") {
+                Toast.makeText(this, "Wi‑Fi Direct is only available for file sharing", Toast.LENGTH_LONG).show()
+                return@setOnClickListener
+            }
 
             val targetActivity = when (transferMode to contentType) {
                 "manual" to "file" -> SecureShareManualFileActivity::class.java
                 "bluetooth" to "file" -> SecureShareBluetoothFileActivity::class.java
+                "wifi_direct" to "file" -> SecureShareWifiDirectFileActivity::class.java
                 "manual" to "text" -> SecureShareManualTextActivity::class.java
                 "bluetooth" to "text" -> SecureShareBluetoothTextActivity::class.java
                 else -> SecureShareManualTextActivity::class.java

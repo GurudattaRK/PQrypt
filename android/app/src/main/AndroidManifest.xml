@@ -28,6 +28,9 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <!-- Android 13+ (API 33+) nearby Wi‑Fi devices runtime permission -->
     <uses-permission android:name="android.permission.NEARBY_WIFI_DEVICES" tools:targetApi="tiramisu" />
+
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
     
     <!-- Bluetooth features -->
     <uses-feature android:name="android.hardware.bluetooth" android:required="true" />
@@ -115,6 +118,10 @@
 
         <activity
             android:name=".SecureShareBluetoothTextActivity"
+            android:exported="false" />
+
+        <activity
+            android:name=".SecureShareWifiDirectFileActivity"
             android:exported="false" />
 
         <activity

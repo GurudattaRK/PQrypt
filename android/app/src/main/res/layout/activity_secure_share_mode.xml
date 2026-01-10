@@ -116,6 +116,13 @@
             android:layout_height="wrap_content"
             android:text="Bluetooth (Automatic)"
             android:textSize="16sp" />
+
+        <RadioButton
+            android:id="@+id/rb_wifi_direct"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Wi‑Fi Direct (Automatic)"
+            android:textSize="16sp" />
     </RadioGroup>
 
     <!-- Role Selection -->
