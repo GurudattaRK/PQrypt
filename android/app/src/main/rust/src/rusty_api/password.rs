@@ -1,5 +1,5 @@
 use super::constants_errors::*;
-use crate::crypto_core::func::argon2id_derive;
+use crate::crypto_core::openssl_ffi::argon2id_derive;
 use std::collections::HashMap;
 
 const MAX_PASSWORD_LEN: usize = 64;

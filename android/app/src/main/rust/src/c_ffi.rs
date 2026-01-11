@@ -92,13 +92,13 @@ fn init_logging() {
         }
     }
 }
-use crate::crypto_core::func::*;
+use crate::crypto_core::openssl_ffi::*;
 use crate::rusty_api::constants_errors::*;
 use crate::rusty_api::api::{double_encrypt_fd_raw, double_decrypt_fd_raw};
 use crate::rusty_api::password::generate_password;
 use crate::crypto_core::{sender_init, receiver, sender_final};
 use crate::crypto_core::hybrids::{Package1, Package2};
-use crate::crypto_core::func::{MlKem1024X448SecretKey, HqcP521SecretKey};
+use crate::crypto_core::openssl_ffi::{MlKem1024X448SecretKey, HqcP521SecretKey};
 
 static mut SENDER_STATE: Option<(MlKem1024X448SecretKey, HqcP521SecretKey)> = None;
 static mut RECEIVER_STATE: Option<(MlKem1024X448SecretKey, HqcP521SecretKey)> = None;

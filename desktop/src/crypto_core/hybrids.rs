@@ -57,7 +57,7 @@ pub fn double_decrypt(
     double_ciphertext: &mut [u8],
     aad: &[u8]
 ) -> Result<Vec<u8>, String> {
-    // Step 1: AES-GCM decryption (includes tag verification with AAD)
+    // Step 1: AES-GCM decryption (includes tag verification)
     let mut chacha_ciphertext = aes_decrypt_with_aad(aes_key, aes_nonce, double_ciphertext, aes_tag, aad)?;
     
     // Step 2: ChaCha20 decryption

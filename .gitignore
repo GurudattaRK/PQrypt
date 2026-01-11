@@ -20,6 +20,9 @@ local.properties
 /android/build/
 /desktop/target/
 
+# Local prebuilt crypto toolchains
+/Openssl/
+
 # Generated files
 *.apk
 *.aab

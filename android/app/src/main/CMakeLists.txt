@@ -56,13 +56,20 @@ set(CLANG_BIN ${ANDROID_TOOLCHAIN_ROOT}/bin/${CLANG_TRIPLE}${ANDROID_API_LEVEL}-
 set(AR_BIN ${ANDROID_TOOLCHAIN_ROOT}/bin/llvm-ar)
 
 # Set paths to prebuilt OpenSSL and liboqs static libraries (allow override via env)
+get_filename_component(PQRYPT_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../../../" ABSOLUTE)
+set(PQRYPT_OPENSSL_BASE $ENV{PQRYPT_CUSTOM_OPENSSL_DIR})
+if(NOT PQRYPT_OPENSSL_BASE)
+    set(PQRYPT_OPENSSL_BASE "${PQRYPT_ROOT}/Openssl")
+endif()
+
 set(OPENSSL_BASE $ENV{OPENSSL_ANDROID_DIR})
 if(NOT OPENSSL_BASE)
-    set(OPENSSL_BASE "$ENV{HOME}/crypto-static-libs/openssl-3.6-android")
+    set(OPENSSL_BASE "${PQRYPT_OPENSSL_BASE}/static_libs/openssl-3.6-android")
 endif()
+
 set(OQS_BASE $ENV{LIBOQS_ANDROID_DIR})
 if(NOT OQS_BASE)
-    set(OQS_BASE "$ENV{HOME}/crypto-static-libs/liboqs-0.15-android")
+    set(OQS_BASE "${PQRYPT_OPENSSL_BASE}/static_libs/liboqs-0.15-android")
 endif()
 
 # Compute lib/include directories (prefer ABI-specific layout if present)
@@ -124,6 +131,10 @@ target_compile_options(rusty_crypto_jni PRIVATE
     -flto                       # Link-time optimization
     -fomit-frame-pointer        # Omit frame pointer for performance
     -DNDEBUG                    # Disable assertions
+)
+
+target_link_options(rusty_crypto_jni PRIVATE
+    -flto
 )
 
 # Use absolute static libraries (must exist for this ABI)
