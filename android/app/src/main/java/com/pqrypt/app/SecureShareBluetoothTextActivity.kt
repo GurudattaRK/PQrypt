@@ -154,7 +154,7 @@ class SecureShareBluetoothTextActivity : AppCompatActivity() {
     }
 
     private fun setupUI() {
-        binding.tvRole.text = "Role: ${role.capitalize()}"
+        binding.tvRole.text = role.replaceFirstChar { if (it.isLowerCase()) it.titlecase() else it.toString() }
         
         binding.btnBack.setOnClickListener { finish() }
         binding.btnHelp.setOnClickListener {

@@ -86,7 +86,7 @@ class KeyExchangeProcessActivity : AppCompatActivity() { // Guided UI for 3-mess
             result.data?.data?.let { uri -> // Extract content URI
                 selectedKeyFile = uri // Track selection
                 selectedKeyPath = getFileName(uri) // Resolve display name
-                binding.tvKeyFilePath.text = "Key file: $selectedKeyPath" // Update UI
+                binding.tvKeyFilePath.text = selectedKeyPath // Update UI
                 
                 // Read the key file and process based on current step
                 readKeyFile(uri) // Async read + state transition
@@ -141,8 +141,9 @@ class KeyExchangeProcessActivity : AppCompatActivity() { // Guided UI for 3-mess
             !isSender && currentStep >= 3 -> "✅ Complete! final.key has been generated and saved"
             else -> "Process complete"
         }
-        
-        binding.tvStatus.text = "$role: $stepDescription" // Render guidance
+
+        binding.tvRole.text = role
+        binding.tvStatus.text = stepDescription // Render guidance
         when {
             isSender && currentStep == 1 -> binding.btnOpenKeyFile.text = "Start"
             isSender && currentStep == 2 -> binding.btnOpenKeyFile.text = "Open 2.key"

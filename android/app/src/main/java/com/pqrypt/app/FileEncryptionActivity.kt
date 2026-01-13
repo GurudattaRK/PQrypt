@@ -216,7 +216,7 @@ class FileEncryptionActivity : AppCompatActivity() { // UI for selecting files a
         }
 
         binding.etPassword.setOnFocusChangeListener { _, hasFocus -> // When password field loses focus
-            if (!hasFocus && binding.etPassword.text.isNotEmpty()) { // If there is input present
+            if (!hasFocus && binding.etPassword.text?.isNotEmpty() == true) { // If there is input present
                 generatePasswordKey() // Derive the password key
             }
         }
@@ -259,7 +259,7 @@ class FileEncryptionActivity : AppCompatActivity() { // UI for selecting files a
 
             // Ensure password key is generated before encryption
             if (selectedFileUri != null) { // Proceed only if an input file has been chosen
-                if (passwordKey == null && (binding.etPassword.text.isNotEmpty() || isUsingKeyFile)) { // Key missing but inputs present
+                if (passwordKey == null && ((binding.etPassword.text?.isNotEmpty() == true) || isUsingKeyFile)) { // Key missing but inputs present
                     if (isUsingKeyFile) deriveKeyFromKeyFilePreview() else generatePasswordKey() // Choose derivation source
                     // Wait a moment for key generation, then try again
                     CoroutineScope(Dispatchers.Main).launch { // Delay to allow async derivation to complete
@@ -302,7 +302,7 @@ class FileEncryptionActivity : AppCompatActivity() { // UI for selecting files a
 
             // Ensure password key is generated before decryption
             if (selectedFileUri != null) { // Proceed only if an input file has been chosen
-                if (passwordKey == null && binding.etPassword.text.isNotEmpty()) { // Key missing but password entered
+                if (passwordKey == null && binding.etPassword.text?.isNotEmpty() == true) { // Key missing but password entered
                     generatePasswordKey() // Derive from entered password
                     // Wait a moment for key generation, then try again
                     CoroutineScope(Dispatchers.Main).launch { // Delay to allow async derivation to complete

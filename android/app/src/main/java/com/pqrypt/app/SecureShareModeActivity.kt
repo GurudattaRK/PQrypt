@@ -28,18 +28,17 @@ class SecureShareModeActivity : AppCompatActivity() {
             startActivity(Intent(this, HelpActivity::class.java).putExtra("screen", "secure_share"))
         }
 
-        binding.btnContinue.setOnClickListener {
+        fun go(role: String) {
             val contentType = if (binding.rbText.isChecked) "text" else "file"
             val transferMode = when {
                 binding.rbManual.isChecked -> "manual"
                 binding.rbBluetooth.isChecked -> "bluetooth"
                 else -> "wifi_direct"
             }
-            val role = if (binding.rbSender.isChecked) "sender" else "receiver"
 
             if (transferMode == "wifi_direct" && contentType == "text") {
                 Toast.makeText(this, "Wi‑Fi Direct is only available for file sharing", Toast.LENGTH_LONG).show()
-                return@setOnClickListener
+                return
             }
 
             val targetActivity = when (transferMode to contentType) {
@@ -53,10 +52,13 @@ class SecureShareModeActivity : AppCompatActivity() {
 
             val intent = Intent(this, targetActivity).apply {
                 putExtra("content_type", contentType)
-                putExtra("transfer_mode", transferMode) 
+                putExtra("transfer_mode", transferMode)
                 putExtra("role", role)
             }
             startActivity(intent)
         }
+
+        binding.btnSend.setOnClickListener { go("sender") }
+        binding.btnReceive.setOnClickListener { go("receiver") }
     }
 }

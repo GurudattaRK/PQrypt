@@ -1,102 +1,99 @@
 <?xml version="1.0" encoding="utf-8"?>
 <ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
-    android:layout_height="match_parent">
+    android:layout_height="match_parent"
+    android:fillViewport="true">
 
     <LinearLayout
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
+        android:layout_height="match_parent"
         android:orientation="vertical"
-        android:padding="16dp"
-        android:gravity="center">
+        android:padding="24dp"
+        android:gravity="center_horizontal">
 
-    <LinearLayout
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:orientation="horizontal"
-        android:layout_marginBottom="16dp">
-
-        <Button
+        <com.google.android.material.button.MaterialButton
             android:id="@+id/btn_back"
+            style="@style/Widget.Material3.Button.TextButton"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="← Back"
-            android:textSize="16sp"
-            style="@style/Widget.Material3.Button"
-            android:backgroundTint="#BA68C8"
-            android:textColor="@android:color/white" />
+            android:layout_gravity="start"
+            android:text="Back" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="24dp"
+            android:layout_marginBottom="20dp"
+            android:text="PQC Key Exchange"
+            android:textAppearance="@style/TextAppearance.PQrypt.Title" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="16dp"
+            android:text="Choose exchange mode"
+            android:textAppearance="?attr/textAppearanceBodyLarge" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="16dp"
+            android:gravity="center"
+            android:orientation="horizontal">
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btn_manual_mode"
+                style="@style/Widget.Material3.Button"
+                android:layout_width="0dp"
+                android:layout_height="130dp"
+                android:layout_marginEnd="12dp"
+                android:layout_weight="1"
+                android:ellipsize="end"
+                android:maxLines="1"
+                android:text="Manual"
+                android:textColor="?attr/colorOnPrimary"
+                android:backgroundTint="?attr/colorPrimary"
+                app:cornerRadius="28dp"
+                app:icon="@drawable/ic_manual"
+                app:iconTint="@null"
+                app:iconGravity="textTop"
+                app:iconPadding="10dp"
+                app:iconSize="56dp" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btn_bluetooth_mode"
+                style="@style/Widget.Material3.Button"
+                android:layout_width="0dp"
+                android:layout_height="130dp"
+                android:layout_weight="1"
+                android:ellipsize="end"
+                android:maxLines="1"
+                android:text="Bluetooth"
+                android:textColor="?attr/colorOnPrimary"
+                android:backgroundTint="?attr/colorPrimary"
+                app:cornerRadius="28dp"
+                app:icon="@drawable/ic_bluetooth"
+                app:iconTint="@android:color/black"
+                app:iconGravity="textTop"
+                app:iconPadding="10dp"
+                app:iconSize="56dp" />
+
+        </LinearLayout>
 
         <Space
-            android:layout_width="0dp"
-            android:layout_height="1dp"
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
             android:layout_weight="1" />
 
-        <Button
+        <com.google.android.material.button.MaterialButton
             android:id="@+id/btn_help"
+            style="@style/Widget.Material3.Button.TextButton"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="Help?"
-            style="@style/Widget.Material3.Button"
-            android:backgroundTint="#FF9800"
-            android:textColor="@android:color/white"
-            android:textSize="16sp" />
-    </LinearLayout>
-
-    <TextView
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:text="PQC Key Exchange"
-        android:textSize="24sp"
-        android:textStyle="bold"
-        android:layout_marginBottom="24dp" />
-
-    <TextView
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:text="Choose exchange mode:"
-        android:textSize="16sp"
-        android:layout_marginBottom="32dp" />
-
-    <Button
-        android:id="@+id/btn_manual_mode"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:text="Manual Exchange"
-        android:textSize="18sp"
-        android:padding="16dp"
-        android:layout_marginBottom="16dp"
-        style="@style/Widget.Material3.Button"
-        android:backgroundTint="#00B0F0"
-        android:textColor="@android:color/white" />
-
-    <TextView
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:text="Exchange key files manually through file transfer"
-        android:textSize="12sp"
-        android:textColor="@android:color/darker_gray"
-        android:layout_marginBottom="24dp"
-        android:gravity="center" />
-
-    <Button
-        android:id="@+id/btn_bluetooth_mode"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:text="Bluetooth Exchange"
-        android:textSize="18sp"
-        android:padding="16dp"
-        style="@style/Widget.Material3.Button"
-        android:backgroundTint="#4CAF50"
-        android:textColor="@android:color/white" />
-
-    <TextView
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:text="Automatically exchange keys via Bluetooth connection"
-        android:textSize="12sp"
-        android:textColor="@android:color/darker_gray"
-        android:layout_marginTop="8dp"
-        android:gravity="center" />
+            android:text="Help"
+            app:icon="@drawable/ic_help"
+            app:iconGravity="textStart" />
 
     </LinearLayout>
 

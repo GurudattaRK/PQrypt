@@ -1,180 +1,217 @@
 <?xml version="1.0" encoding="utf-8"?>
-<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+<androidx.constraintlayout.widget.ConstraintLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:padding="20dp">
+    android:padding="16dp">
 
-    <LinearLayout
+    <com.google.android.material.button.MaterialButton
+        android:id="@+id/btn_back"
+        style="@style/Widget.Material3.Button.TextButton"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="← Back"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toTopOf="parent" />
+
+    <ScrollView
+        android:layout_width="0dp"
+        android:layout_height="0dp"
+        android:fillViewport="true"
+        app:layout_constraintBottom_toTopOf="@id/btn_help"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toBottomOf="@id/btn_back">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center_horizontal"
+            android:orientation="vertical"
+            android:paddingTop="24dp"
+            android:paddingBottom="24dp">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="20dp"
+                android:text="File Encryption"
+                android:textAppearance="@style/TextAppearance.PQrypt.Title" />
+
+            <com.google.android.material.card.MaterialCardView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="16dp"
+                app:cardElevation="0dp"
+                app:cardUseCompatPadding="true">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:padding="16dp">
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btn_choose_file"
+                        style="@style/Widget.Material3.Button.OutlinedButton"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="Choose file" />
+
+                    <TextView
+                        android:id="@+id/tv_selected_file"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="10dp"
+                        android:text="No file selected"
+                        android:textAppearance="@style/TextAppearance.PQrypt.Body" />
+
+                </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
+
+            <com.google.android.material.card.MaterialCardView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="16dp"
+                app:cardElevation="0dp"
+                app:cardUseCompatPadding="true">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:padding="16dp">
+
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginBottom="10dp"
+                        android:text="Password"
+                        android:textAppearance="@style/TextAppearance.PQrypt.Button" />
+
+                    <com.google.android.material.textfield.TextInputLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        style="@style/Widget.Material3.TextInputLayout.OutlinedBox"
+                        android:hint="Enter password">
+
+                        <com.google.android.material.textfield.TextInputEditText
+                            android:id="@+id/et_password"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:inputType="textPassword" />
+
+                    </com.google.android.material.textfield.TextInputLayout>
+
+                </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
+
+            <com.google.android.material.card.MaterialCardView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="16dp"
+                app:cardElevation="0dp"
+                app:cardUseCompatPadding="true">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:padding="16dp">
+
+                    <com.google.android.material.button.MaterialButton
+                        android:id="@+id/btn_use_key_file"
+                        style="@style/Widget.Material3.Button.OutlinedButton"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="Use key file"
+                        app:icon="@drawable/ic_key"
+                        app:iconTint="@null"
+                        app:iconGravity="textStart" />
+
+                    <TextView
+                        android:id="@+id/tv_key_file_path"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="10dp"
+                        android:text="Key file: None"
+                        android:textAppearance="@style/TextAppearance.PQrypt.Body" />
+
+                </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="16dp"
+                android:orientation="horizontal">
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btn_encrypt"
+                    style="@style/Widget.Material3.Button"
+                    android:layout_width="0dp"
+                    android:layout_height="120dp"
+                    android:layout_marginEnd="12dp"
+                    android:layout_weight="1"
+                    android:ellipsize="end"
+                    android:maxLines="1"
+                    android:text="Encrypt"
+                    android:textAppearance="@style/TextAppearance.PQrypt.Button"
+                    app:cornerRadius="28dp"
+                    app:icon="@drawable/ic_encrypt"
+                    app:iconTint="@null"
+                    app:iconGravity="textTop"
+                    app:iconPadding="6dp"
+                    app:iconSize="56dp" />
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btn_decrypt"
+                    style="@style/Widget.Material3.Button"
+                    android:layout_width="0dp"
+                    android:layout_height="120dp"
+                    android:layout_weight="1"
+                    android:ellipsize="end"
+                    android:maxLines="1"
+                    android:text="Decrypt"
+                    android:textAppearance="@style/TextAppearance.PQrypt.Button"
+                    app:cornerRadius="28dp"
+                    app:icon="@drawable/ic_decrypt"
+                    app:iconTint="@null"
+                    app:iconGravity="textTop"
+                    app:iconPadding="6dp"
+                    app:iconSize="56dp" />
+
+            </LinearLayout>
+
+            <com.google.android.material.card.MaterialCardView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                app:cardElevation="0dp"
+                app:cardUseCompatPadding="true">
+
+                <TextView
+                    android:id="@+id/tv_output_path"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:padding="16dp"
+                    android:text="No output file yet"
+                    android:textAppearance="@style/TextAppearance.PQrypt.Body" />
+
+            </com.google.android.material.card.MaterialCardView>
+
+        </LinearLayout>
+    </ScrollView>
+
+    <com.google.android.material.button.MaterialButton
+        android:id="@+id/btn_help"
+        style="@style/Widget.Material3.Button.OutlinedButton"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:orientation="vertical"
-        android:gravity="center_horizontal">
+        android:text="Help"
+        app:icon="@drawable/ic_help"
+        app:iconGravity="textStart"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent" />
 
-        <!-- Top Bar: Back (left) + Help? (right) -->
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="horizontal"
-            android:layout_marginBottom="8dp">
-
-            <Button
-                android:id="@+id/btn_back"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="← Back"
-                android:textSize="16sp"
-                style="@style/Widget.Material3.Button"
-                android:backgroundTint="#BA68C8"
-                android:textColor="@android:color/white" />
-
-            <Space
-                android:layout_width="0dp"
-                android:layout_height="1dp"
-                android:layout_weight="1" />
-
-            <Button
-                android:id="@+id/btn_help"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="Help?"
-                style="@style/Widget.Material3.Button"
-                android:backgroundTint="#FF9800"
-                android:textColor="@android:color/white"
-                android:textSize="16sp" />
-        </LinearLayout>
-
-        <!-- Title -->
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="16dp"
-            android:layout_marginBottom="24dp"
-            android:text="File Encryption"
-            android:textSize="26sp"
-            android:textStyle="bold" />
-
-        <!-- File Selection Card -->
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="vertical"
-            android:padding="16dp"
-            android:layout_marginBottom="20dp">
-
-            <Button
-                android:id="@+id/btn_choose_file"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:text="Choose File"
-                android:backgroundTint="#00B0F0"
-                android:textColor="@android:color/white" />
-
-            <TextView
-                android:id="@+id/tv_selected_file"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="8dp"
-                android:text="No file selected"
-                android:textSize="14sp"
-                android:textColor="@android:color/darker_gray" />
-        </LinearLayout>
-
-        <!-- Password Input -->
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="vertical"
-            android:padding="16dp"
-            android:layout_marginBottom="20dp">
-
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="Password"
-                android:textSize="14sp"
-                android:textColor="@android:color/darker_gray"
-                android:layout_marginBottom="6dp" />
-
-            <EditText
-                android:id="@+id/et_password"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:hint="Enter password"
-                android:inputType="textPassword"
-                android:backgroundTint="?attr/colorPrimary"
-                android:padding="12dp" />
-        </LinearLayout>
-
-        <!-- Key File -->
-        <Button
-            android:id="@+id/btn_use_key_file"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="Use Key File"
-            android:backgroundTint="#00B0F0"
-            android:textColor="@android:color/white" />
-
-        <TextView
-            android:id="@+id/tv_key_file_path"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginBottom="20dp"
-            android:text="Key file: None"
-            android:textSize="12sp"
-            android:textColor="@android:color/darker_gray" />
-
-        <!-- Action Buttons -->
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="horizontal"
-            android:gravity="center"
-            android:layout_marginBottom="24dp">
-
-            <Button
-                android:id="@+id/btn_encrypt"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:text="Encrypt"
-                android:backgroundTint="#00AF00"
-                android:textColor="@android:color/white"
-                android:layout_marginEnd="8dp"/>
-
-            <Button
-                android:id="@+id/btn_decrypt"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:text="Decrypt"
-                android:backgroundTint="#D80000"
-                android:textColor="@android:color/white"
-                android:layout_marginStart="8dp"/>
-        </LinearLayout>
-
-        <!-- Output Section -->
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="vertical"
-            android:padding="16dp">
-
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="Output file path:"
-                android:textSize="16sp"
-                android:textStyle="bold"
-                android:layout_marginBottom="6dp" />
-
-            <TextView
-                android:id="@+id/tv_output_path"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="No output file yet"
-                android:textSize="14sp"
-                android:textColor="@android:color/darker_gray" />
-        </LinearLayout>
-
-    </LinearLayout>
-</ScrollView>
+</androidx.constraintlayout.widget.ConstraintLayout>

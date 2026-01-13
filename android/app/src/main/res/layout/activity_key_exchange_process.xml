@@ -1,120 +1,106 @@
 <?xml version="1.0" encoding="utf-8"?>
-<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+<androidx.constraintlayout.widget.ConstraintLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
-    android:layout_height="match_parent">
+    android:layout_height="match_parent"
+    android:padding="16dp">
 
-    <LinearLayout
-        android:layout_width="match_parent"
+    <com.google.android.material.button.MaterialButton
+        android:id="@+id/btn_back"
+        style="@style/Widget.Material3.Button.TextButton"
+        android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:orientation="vertical"
-        android:padding="16dp">
+        android:text="← Back"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toTopOf="parent" />
 
-    <LinearLayout
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:orientation="horizontal"
-        android:layout_marginBottom="16dp">
+    <ScrollView
+        android:layout_width="0dp"
+        android:layout_height="0dp"
+        android:fillViewport="true"
+        app:layout_constraintBottom_toTopOf="@id/btn_help"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toBottomOf="@id/btn_back">
 
-        <Button
-            android:id="@+id/btn_back"
-            android:layout_width="wrap_content"
+        <LinearLayout
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="← Back"
-            android:textSize="16sp"
-            style="@style/Widget.Material3.Button"
-            android:backgroundTint="#BA68C8"
-            android:textColor="@android:color/white" />
+            android:orientation="vertical"
+            android:paddingTop="16dp"
+            android:paddingBottom="16dp">
 
-        <Space
-            android:layout_width="0dp"
-            android:layout_height="1dp"
-            android:layout_weight="1" />
+            <TextView
+                android:id="@+id/tv_role"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center"
+                android:text="Sender"
+                android:textAppearance="@style/TextAppearance.PQrypt.Headline"
+                android:layout_marginBottom="16dp" />
 
-        <Button
-            android:id="@+id/btn_help"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="Help?"
-            style="@style/Widget.Material3.Button"
-            android:backgroundTint="#FF9800"
-            android:textColor="@android:color/white"
-            android:textSize="16sp" />
-    </LinearLayout>
+            <com.google.android.material.card.MaterialCardView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="16dp"
+                app:cardElevation="0dp"
+                app:cardUseCompatPadding="true">
 
-    <TextView
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:text="Key Exchange Process"
-        android:textSize="24sp"
-        android:textStyle="bold"
-        android:layout_marginBottom="16dp" />
+                <TextView
+                    android:id="@+id/tv_status"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:padding="16dp"
+                    android:text="Initializing..."
+                    android:textAppearance="@style/TextAppearance.PQrypt.Body" />
 
-    <TextView
-        android:id="@+id/tv_status"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:text="Status: Initializing..."
-        android:textSize="16sp"
-        android:textStyle="bold"
-        android:layout_marginBottom="24dp"
-        android:background="@android:color/holo_red_light"
-        android:padding="12dp"
-        android:textColor="@android:color/white" />
+            </com.google.android.material.card.MaterialCardView>
 
-    <Button
-        android:id="@+id/btn_open_key_file"
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btn_open_key_file"
+                style="@style/Widget.Material3.Button"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="8dp"
+                android:text="Open Key File" />
+
+            <TextView
+                android:id="@+id/tv_key_file_path"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="16dp"
+                android:text="No key file selected"
+                android:textAppearance="@style/TextAppearance.PQrypt.Body" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btn_generate_key_file"
+                style="@style/Widget.Material3.Button"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Generate Key File"
+                android:visibility="gone" />
+
+            <TextView
+                android:id="@+id/tv_generated_file_path"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:text="No key file generated yet"
+                android:textAppearance="@style/TextAppearance.PQrypt.Body" />
+
+        </LinearLayout>
+    </ScrollView>
+
+    <com.google.android.material.button.MaterialButton
+        android:id="@+id/btn_help"
+        style="@style/Widget.Material3.Button.OutlinedButton"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:text="Open Key File"
-        android:textSize="16sp"
-        android:padding="12dp"
-        android:layout_marginBottom="8dp"
-        android:backgroundTint="#00B0F0"
-        android:textColor="@android:color/white"/>
+        android:text="Help"
+        app:icon="@drawable/ic_help"
+        app:iconGravity="textStart"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent" />
 
-
-    <TextView
-        android:id="@+id/tv_key_file_path"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:text="No key file selected"
-        android:textSize="14sp"
-        android:layout_marginBottom="16dp" />
-
-    <Button
-        android:id="@+id/btn_generate_key_file"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:text="Generate Key File"
-        android:textSize="16sp"
-        android:padding="12dp"
-        android:layout_marginBottom="8dp"
-        android:backgroundTint="#00AF00"
-        android:textColor="@android:color/white"/>
-
-    <TextView
-        android:id="@+id/tv_generated_file_path"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:text="No key file generated yet"
-        android:textSize="14sp"
-        android:layout_marginBottom="16dp" />
-
-    <TextView
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:text="Key Exchange Steps:"
-        android:textSize="16sp"
-        android:textStyle="bold"
-        android:layout_marginBottom="8dp" />
-
-    <TextView
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:text="Sender: 1.key → 2.key → 3.key → final.key\nReceiver: 1.key → 2.key → 3.key → final.key"
-        android:textSize="14sp"
-        android:layout_marginBottom="16dp" />
-
-    </LinearLayout>
-
-</ScrollView>
+</androidx.constraintlayout.widget.ConstraintLayout>

@@ -10,9 +10,10 @@
 
     <LinearLayout
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
+        android:layout_height="match_parent"
         android:orientation="vertical"
-        android:padding="24dp">
+        android:padding="24dp"
+        android:gravity="center_horizontal">
 
         <!-- Header -->
         <LinearLayout
@@ -22,48 +23,20 @@
             android:gravity="center_vertical"
             android:layout_marginBottom="24dp">
 
-            <Button
+            <com.google.android.material.button.MaterialButton
                 android:id="@+id/btn_back"
-                style="@style/Widget.Material3.Button"
+                style="@style/Widget.Material3.Button.TextButton"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:backgroundTint="#9C27B0"
-                android:text="← Back"
-                android:textColor="@android:color/white"
-            android:textSize="14sp" />
-
-            <View
-                android:layout_width="0dp"
-                android:layout_height="1dp"
-                android:layout_weight="1" />
-
-            <Button
-                android:id="@+id/btn_help"
-                style="@style/Widget.Material3.Button"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:backgroundTint="#FF9800"
-                android:text="Help?"
-                android:textColor="@android:color/white"
-            android:textSize="14sp" />
+                android:text="Back" />
         </LinearLayout>
-
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="Secure Text Share - Manual"
-            android:textSize="24sp"
-            android:textStyle="bold"
-            android:layout_marginBottom="16dp"
-            android:layout_gravity="center_horizontal" />
 
         <TextView
             android:id="@+id/tv_role"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:text="Role: Sender"
-            android:textSize="16sp"
-            android:textStyle="bold"
+            android:textAppearance="@style/TextAppearance.PQrypt.Headline"
             android:layout_marginBottom="16dp"
             android:layout_gravity="center_horizontal" />
 
@@ -72,8 +45,7 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:text="Enter text to share, then start the key exchange process"
-            android:textSize="14sp"
-            android:textColor="#0066cc"
+            android:textAppearance="@style/TextAppearance.PQrypt.Body"
             android:layout_marginBottom="16dp"
             android:gravity="center" />
 
@@ -193,6 +165,21 @@
             style="@style/Widget.Material3.Button"
             android:backgroundTint="#f44336"
             android:textColor="@android:color/white" />
+
+        <Space
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btn_help"
+            style="@style/Widget.Material3.Button.TextButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="center_horizontal"
+            android:text="Help"
+            app:icon="@drawable/ic_help"
+            app:iconGravity="textStart" />
 
     </LinearLayout>
 </ScrollView>

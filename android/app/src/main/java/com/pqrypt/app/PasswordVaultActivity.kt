@@ -91,6 +91,8 @@ class PasswordVaultActivity : AppCompatActivity() { // UI to derive, display, an
 
         // Clear UI display only
         binding.tvGeneratedPassword.text = "🔒 Password hidden while app is in background. Autofill remains available for 60s." // Inform user
+
+        updateActionButtons()
     }
 
     override fun onDestroy() { // Cleanup when activity is destroyed
@@ -128,6 +130,10 @@ class PasswordVaultActivity : AppCompatActivity() { // UI to derive, display, an
 
         binding.btnHelp.setOnClickListener {
             startActivity(Intent(this, HelpActivity::class.java).putExtra("screen", "password_vault"))
+        }
+
+        binding.btnErase.setOnClickListener {
+            clearAllPasswordData()
         }
 
         // No focus-based hashing - everything happens on Generate button
@@ -204,6 +210,18 @@ class PasswordVaultActivity : AppCompatActivity() { // UI to derive, display, an
         binding.btnAutofillStatus.setOnClickListener { // Check and manage autofill service status
             checkAndManageAutofillService()
         }
+
+        updateActionButtons()
+    }
+
+    private fun updateActionButtons() {
+        val enabled = !currentGeneratedPassword.isNullOrEmpty()
+
+        binding.btnErase.isEnabled = enabled
+        binding.btnErase.alpha = if (enabled) 1.0f else 0.5f
+
+        binding.btnUnsafeClipboardCopy.isEnabled = enabled
+        binding.btnUnsafeClipboardCopy.alpha = if (enabled) 1.0f else 0.5f
     }
 
     override fun onResume() { // Reload settings when returning to foreground
@@ -304,14 +322,14 @@ class PasswordVaultActivity : AppCompatActivity() { // UI to derive, display, an
                     
                     // Display the generated password
                     binding.tvGeneratedPassword.text = generatedPassword
-                    binding.btnUnsafeClipboardCopy.visibility = View.VISIBLE
+                    updateActionButtons()
                     
                     // Clear password after 60 seconds for security
                     clearPasswordHandler?.removeCallbacksAndMessages(null)
                     clearPasswordHandler?.postDelayed({
                         currentGeneratedPassword = null
                         binding.tvGeneratedPassword.text = "🔒 Password cleared for security"
-                        binding.btnUnsafeClipboardCopy.visibility = View.GONE
+                        updateActionButtons()
                         Toast.makeText(this@PasswordVaultActivity, "Password cleared from memory", Toast.LENGTH_SHORT).show()
                     }, 60000)
                     
@@ -386,9 +404,8 @@ class PasswordVaultActivity : AppCompatActivity() { // UI to derive, display, an
         finalPasswordHash = null // Drop reference
         
         binding.tvGeneratedPassword.text = "🔒 Password cleared for security" // Update UI message
-        
-        // Hide the unsafe clipboard copy button
-        binding.btnUnsafeClipboardCopy.visibility = android.view.View.GONE // Hide button
+
+        updateActionButtons()
         
         Toast.makeText(this, "🔒 All password data cleared from memory", Toast.LENGTH_SHORT).show() // Notify
         
@@ -477,10 +494,10 @@ class PasswordVaultActivity : AppCompatActivity() { // UI to derive, display, an
 
     private fun updateAutofillStatusButton() { // Update button text based on autofill service status
         if (isAutofillServiceEnabled()) {
-            binding.btnAutofillStatus.text = "✅ Autofill Service Active"
+            binding.btnAutofillStatus.text = "Autofill"
             binding.btnAutofillStatus.backgroundTintList = ContextCompat.getColorStateList(this, android.R.color.holo_green_dark)
         } else {
-            binding.btnAutofillStatus.text = "⚙️ Enable Autofill Service"
+            binding.btnAutofillStatus.text = "Enable Autofill"
             binding.btnAutofillStatus.backgroundTintList = ContextCompat.getColorStateList(this, android.R.color.holo_orange_dark)
         }
     }

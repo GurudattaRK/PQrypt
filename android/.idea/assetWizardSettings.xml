@@ -340,8 +340,8 @@
                         <option name="values">
                           <map>
                             <entry key="assetSourceType" value="FILE" />
-                            <entry key="outputName" value="logo" />
-                            <entry key="sourceFile" value="$PROJECT_DIR$/../Logo.svg" />
+                            <entry key="outputName" value="pqc_key_exchange" />
+                            <entry key="sourceFile" value="$PROJECT_DIR$/../SVG/PQC_key_exchange.svg" />
                           </map>
                         </option>
                       </PersistentState>

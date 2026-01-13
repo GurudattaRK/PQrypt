@@ -4,8 +4,8 @@ import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
 import android.os.Bundle
-import android.widget.SeekBar
 import androidx.appcompat.app.AppCompatActivity
+import com.google.android.material.slider.Slider
 import com.pqrypt.app.databinding.ActivityPasswordSettingsBinding
 
 class PasswordSettingsActivity : AppCompatActivity() { // Configure password length and special sets
@@ -57,14 +57,9 @@ class PasswordSettingsActivity : AppCompatActivity() { // Configure password len
             startActivity(Intent(this, HelpActivity::class.java).putExtra("screen", "password_settings"))
         }
 
-        binding.seekBarLength.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener { // Length slider
-            override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
-                passwordLength = progress + 8 // Minimum length of 8
-                binding.tvLengthValue.text = passwordLength.toString() // Update label
-            }
-
-            override fun onStartTrackingTouch(seekBar: SeekBar?) {}
-            override fun onStopTrackingTouch(seekBar: SeekBar?) {}
+        binding.seekBarLength.addOnChangeListener(Slider.OnChangeListener { _, value, _ ->
+            passwordLength = value.toInt()
+            binding.tvLengthValue.text = passwordLength.toString()
         })
 
         binding.cbSet1.setOnCheckedChangeListener { _, isChecked ->
@@ -81,7 +76,7 @@ class PasswordSettingsActivity : AppCompatActivity() { // Configure password len
     }
 
     private fun updateUI() { // Reflect current settings on screen
-        binding.seekBarLength.progress = passwordLength - 8 // Adjust for minimum of 8
+        binding.seekBarLength.value = passwordLength.toFloat()
         binding.tvLengthValue.text = passwordLength.toString() // Show current length
         binding.cbSet1.isChecked = enabledSpecialSets[0] // Set 4 toggle
         binding.cbSet2.isChecked = enabledSpecialSets[1] // Set 5 toggle

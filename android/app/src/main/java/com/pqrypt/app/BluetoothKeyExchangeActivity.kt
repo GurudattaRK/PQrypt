@@ -259,14 +259,14 @@ class BluetoothKeyExchangeActivity : AppCompatActivity() {
 
     private fun updateDeviceInfo() {
         if (ActivityCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED) {
-            binding.tvDeviceName.text = "Device Name: Permission required"
-            binding.tvDeviceAddress.text = "MAC Address: Permission required"
+            binding.tvDeviceName.text = "Permission required"
+            binding.tvDeviceAddress.text = "Permission required"
             return
         }
         
         bluetoothAdapter?.let { adapter ->
-            binding.tvDeviceName.text = "Device Name: ${adapter.name ?: "Unknown"}"
-            binding.tvDeviceAddress.text = "MAC Address: ${adapter.address ?: "Unknown"}"
+            binding.tvDeviceName.text = adapter.name ?: "Unknown"
+            binding.tvDeviceAddress.text = adapter.address ?: "Unknown"
         }
     }
 
@@ -309,7 +309,7 @@ class BluetoothKeyExchangeActivity : AppCompatActivity() {
         isSender = sender
         
         // Update role selection label
-        binding.tvRoleLabel.text = if (sender) "Role: Sender (Discoverable)" else "Role: Receiver (Scanning)"
+        binding.tvRoleLabel.text = if (sender) "Sender" else "Receiver"
         
         // Update button colors
         binding.btnSenderRole.backgroundTintList = ContextCompat.getColorStateList(

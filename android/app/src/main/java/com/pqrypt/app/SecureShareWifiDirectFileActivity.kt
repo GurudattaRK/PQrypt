@@ -167,7 +167,7 @@ class SecureShareWifiDirectFileActivity : AppCompatActivity() {
     }
 
     private fun setupUI() {
-        binding.tvRole.text = "Role: ${role.replaceFirstChar { if (it.isLowerCase()) it.titlecase() else it.toString() }}"
+        binding.tvRole.text = role.replaceFirstChar { if (it.isLowerCase()) it.titlecase() else it.toString() }
 
         binding.btnBack.setOnClickListener { finish() }
         binding.btnHelp.setOnClickListener {
