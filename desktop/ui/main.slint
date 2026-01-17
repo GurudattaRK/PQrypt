@@ -1,25 +1,27 @@
-import { Button, VerticalBox, HorizontalBox, LineEdit, CheckBox, Slider, ScrollView } from "std-widgets.slint";
+import { Button, VerticalBox, HorizontalBox, LineEdit, CheckBox, Slider, ScrollView, Palette } from "std-widgets.slint";
 
-export global Palette {
-    in-out property <brush> red: #E53935;
-    in-out property <brush> green: #43A047;
-    in-out property <brush> blue: #1E88E5;
-    in-out property <brush> light_purple: #BA68C8;
-    in-out property <brush> light_orange: #FF9800;
+export global AppPalette {
+    in-out property <brush> red: #B3261E;
+    in-out property <brush> green: #2E7D32;
+    in-out property <brush> blue: #6750A4;
+    in-out property <brush> light_purple: #7E57C2;
+    in-out property <brush> light_orange: #FF8F00;
     in-out property <brush> white: #ffffff;
 }
 
 component ColorButton inherits Rectangle {
     in-out property <string> text: "";
-    in-out property <brush> bg: Palette.blue;
-    in-out property <brush> fg: Palette.white;
-    in-out property <length> radius: 6px;
+    in-out property <brush> bg: AppPalette.blue;
+    in-out property <brush> fg: #000000;
+    in-out property <length> radius: 28px;
     callback clicked();
 
     background: bg;
     border-radius: radius;
-    height: 40px;
+    clip: true;
+    height: 44px;
     min-width: 80px;
+    vertical-stretch: 0;
 
     TouchArea {
         clicked => { root.clicked(); }
@@ -32,18 +34,171 @@ component ColorButton inherits Rectangle {
         vertical-alignment: center;
         font-weight: 600;
         font-family: "Inter";
+        font-size: 14px;
+    }
+}
+
+component IconButtonRight inherits Rectangle {
+    in-out property <string> text: "";
+    in property <image> icon;
+    in-out property <brush> bg: AppPalette.blue;
+    in-out property <brush> fg: #000000;
+    in-out property <length> radius: 28px;
+    in-out property <length> icon-size: 20px;
+    callback clicked();
+
+    background: bg;
+    border-radius: radius;
+    clip: true;
+    height: 44px;
+    min-width: 80px;
+    vertical-stretch: 0;
+
+    TouchArea {
+        clicked => { root.clicked(); }
+    }
+
+    HorizontalBox {
+        height: parent.height;
+        spacing: 8px;
+        alignment: center;
+
+        Text {
+            text: root.text;
+            color: root.fg;
+            vertical-alignment: center;
+            wrap: no-wrap;
+            overflow: elide;
+            font-weight: 600;
+            font-family: "Inter";
+            font-size: 14px;
+        }
+
+        Image {
+            source: root.icon;
+            width: root.icon-size;
+            height: root.icon-size;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+            image-fit: contain;
+        }
+    }
+}
+
+component TileButton inherits Rectangle {
+    in-out property <string> text: "";
+    in property <image> icon;
+    in-out property <brush> bg: AppPalette.blue;
+    in-out property <brush> fg: #000000;
+    in-out property <length> radius: 28px;
+    in-out property <length> icon-size: 72px;
+    in-out property <length> text-size: 12px;
+    callback clicked();
+
+    background: bg;
+    border-radius: radius;
+    clip: true;
+
+    TouchArea {
+        clicked => { root.clicked(); }
+    }
+
+    VerticalBox {
+        height: parent.height;
+        spacing: 10px;
+
+        Rectangle { vertical-stretch: 1; }
+
+        HorizontalBox {
+            Rectangle { horizontal-stretch: 1; }
+            Image {
+                source: root.icon;
+                width: root.icon-size;
+                height: root.icon-size;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+                image-fit: contain;
+            }
+            Rectangle { horizontal-stretch: 1; }
+        }
+
+        Text {
+            text: root.text;
+            color: root.fg;
+            horizontal-stretch: 1;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+            font-weight: 600;
+            font-family: "Inter";
+            font-size: root.text-size;
+            wrap: no-wrap;
+            overflow: elide;
+        }
+
+        Rectangle { vertical-stretch: 1; }
+    }
+}
+
+component IconButton inherits Rectangle {
+    in-out property <string> text: "";
+    in property <image> icon;
+    in-out property <brush> bg: AppPalette.blue;
+    in-out property <brush> fg: #000000;
+    in-out property <length> radius: 28px;
+    in-out property <length> icon-size: 20px;
+    callback clicked();
+
+    background: bg;
+    border-radius: radius;
+    clip: true;
+    height: 44px;
+    min-width: 80px;
+    vertical-stretch: 0;
+
+    TouchArea {
+        clicked => { root.clicked(); }
+    }
+
+    HorizontalBox {
+        height: parent.height;
+        spacing: 8px;
+        alignment: center;
+
+        Image {
+            source: root.icon;
+            width: root.icon-size;
+            height: root.icon-size;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+            image-fit: contain;
+        }
+
+        Text {
+            text: root.text;
+            color: root.fg;
+            vertical-alignment: center;
+            wrap: no-wrap;
+            overflow: elide;
+            font-weight: 600;
+            font-family: "Inter";
+            font-size: 14px;
+        }
     }
 }
 
 export component MainWindow inherits Window {
     title: "PQrypt";
-    width: 800px;
-    height: 600px;
+    preferred-width: 800px;
+    preferred-height: 600px;
+    min-width: 520px;
+    min-height: 520px;
+    background: Palette.background;
     
     // State variables
     in-out property <string> current-page: "welcome";
     in-out property <bool> sender: false;
     in-out property <string> status-text: "";
+    in-out property <string> pqc-action-text: "";
     in-out property <string> file-path: "";
     in-out property <string> key-file-path: "";
     in-out property <string> output-file-path: "";
@@ -63,6 +218,7 @@ export component MainWindow inherits Window {
     in-out property <string> secure-share-text: "";
     in-out property <string> secure-share-status: "";
     in-out property <string> received-text: "";
+    in-out property <string> secure-share-action-text: "";
     
     // Callbacks for backend functions
     callback exit-app();
@@ -72,7 +228,10 @@ export component MainWindow inherits Window {
     callback decrypt-file();
     callback open-key-file();
     callback generate-key-file();
+    callback reset-pqc();
     callback generate-password();
+    callback copy-password();
+    callback erase-password();
     
     // Secure Share callbacks
     callback secure-share-choose-file();
@@ -80,29 +239,27 @@ export component MainWindow inherits Window {
     callback secure-share-start-receiver();
     callback secure-share-generate-key();
     callback secure-share-open-key();
+    callback secure-share-action();
+    callback secure-share-reset();
     callback secure-share-encrypt();
     callback secure-share-decrypt();
     callback secure-share-choose-key-folder();
     
     VerticalBox {
         // Welcome Page
-        if current-page == "welcome": VerticalBox {
-            alignment: center;
-            spacing: 20px;
+        if current-page == "welcome": ScrollView {
+            VerticalBox {
+                spacing: 20px;
+                padding: 20px;
             
             // Top bar: Exit (left) and Help? (right)
             HorizontalBox {
                 ColorButton {
                     text: "Exit";
-                    bg: Palette.light_purple;
+                    bg: AppPalette.light_purple;
                     clicked => { exit-app(); }
                 }
                 Rectangle { }
-                ColorButton {
-                    text: "Help?";
-                    bg: Palette.light_orange;
-                    clicked => { current-page = "help-welcome"; }
-                }
             }
             
             Text {
@@ -112,70 +269,147 @@ export component MainWindow inherits Window {
                 font-family: "Inter";
                 horizontal-alignment: center;
             }
-            
-            ColorButton {
-                text: "Secure Share";
-                bg: Palette.light_purple;
-                height: 50px;
-                clicked => {
-                    // Reset all state when navigating
-                    file-path = ""; key-file-path = ""; output-file-path = "";
-                    password = ""; status-text = ""; generated-key-path = ""; generated-password = "";
-                    app-name = ""; app-password = ""; master-password = "";
-                    secure-share-text = ""; secure-share-status = ""; received-text = "";
-                    current-page = "secure-share";
+
+            HorizontalBox {
+                Rectangle { }
+                Image {
+                    source: @image-url("SVG/Logo.svg");
+                    width: 72px;
+                    height: 72px;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                    image-fit: contain;
                 }
+                Rectangle { }
             }
-            
-            ColorButton {
-                text: "File Encryption";
-                bg: Palette.red;
-                height: 50px;
-                clicked => {
-                    // Reset all state when navigating
-                    file-path = ""; key-file-path = ""; output-file-path = "";
-                    password = ""; status-text = ""; generated-key-path = ""; generated-password = "";
-                    app-name = ""; app-password = ""; master-password = "";
-                    current-page = "file-encryption";
+
+                HorizontalBox {
+                    Rectangle { horizontal-stretch: 1; }
+
+                    VerticalBox {
+                        spacing: 12px;
+                        alignment: center;
+
+                        property <length> grid_w: Math.min(root.width - 40px, 420px);
+                        property <length> tile: Math.min(170px, (grid_w - 12px) / 2);
+                        property <length> row_w: tile * 2 + 12px;
+                        width: grid_w;
+
+                        HorizontalBox {
+                            Rectangle { horizontal-stretch: 1; }
+                            HorizontalBox {
+                                spacing: 12px;
+                                width: row_w;
+
+                                TileButton {
+                                    text: "Secure Share";
+                                    bg: AppPalette.light_purple;
+                                    radius: 28px;
+                                    icon: @image-url("SVG/Secure_share.svg");
+                                    width: tile;
+                                    height: tile;
+                                    clicked => {
+                                        // Reset all state when navigating
+                                        file-path = ""; key-file-path = ""; output-file-path = "";
+                                        password = ""; status-text = ""; generated-key-path = ""; generated-password = "";
+                                        app-name = ""; app-password = ""; master-password = "";
+                                        secure-share-text = ""; secure-share-status = ""; received-text = "";
+                                        current-page = "secure-share";
+                                    }
+                                }
+
+                                TileButton {
+                                    text: "File Encryption";
+                                    bg: AppPalette.red;
+                                    radius: 28px;
+                                    icon: @image-url("SVG/file_encryption.svg");
+                                    width: tile;
+                                    height: tile;
+                                    clicked => {
+                                        // Reset all state when navigating
+                                        file-path = ""; key-file-path = ""; output-file-path = "";
+                                        password = ""; status-text = ""; generated-key-path = ""; generated-password = "";
+                                        app-name = ""; app-password = ""; master-password = "";
+                                        current-page = "file-encryption";
+                                    }
+                                }
+                            }
+                            Rectangle { horizontal-stretch: 1; }
+                        }
+
+                        HorizontalBox {
+                            Rectangle { horizontal-stretch: 1; }
+                            HorizontalBox {
+                                spacing: 12px;
+                                width: row_w;
+
+                                TileButton {
+                                    text: "PQC Key Exchange";
+                                    bg: AppPalette.green;
+                                    radius: 28px;
+                                    icon: @image-url("SVG/PQC_key_exchange.svg");
+                                    width: tile;
+                                    height: tile;
+                                    clicked => {
+                                        // Reset all state when navigating
+                                        file-path = ""; key-file-path = ""; output-file-path = "";
+                                        password = ""; status-text = ""; generated-key-path = ""; generated-password = "";
+                                        app-name = ""; app-password = ""; master-password = "";
+                                        current-page = "pqc-key-exchange";
+                                    }
+                                }
+
+                                TileButton {
+                                    text: "Password Generator";
+                                    bg: AppPalette.blue;
+                                    radius: 28px;
+                                    icon: @image-url("SVG/Password_generator.svg");
+                                    width: tile;
+                                    height: tile;
+                                    clicked => {
+                                        // Reset all state when navigating
+                                        file-path = ""; key-file-path = ""; output-file-path = "";
+                                        password = ""; status-text = ""; generated-key-path = ""; generated-password = "";
+                                        app-name = ""; app-password = ""; master-password = "";
+                                        current-page = "password-vault";
+                                    }
+                                }
+                            }
+                            Rectangle { horizontal-stretch: 1; }
+                        }
+                    }
+
+                    Rectangle { horizontal-stretch: 1; }
                 }
-            }
-            
-            ColorButton {
-                text: "PQC Key Exchange";
-                bg: Palette.green;
-                height: 50px;
-                clicked => {
-                    // Reset all state when navigating
-                    file-path = ""; key-file-path = ""; output-file-path = "";
-                    password = ""; status-text = ""; generated-key-path = ""; generated-password = "";
-                    app-name = ""; app-password = ""; master-password = "";
-                    current-page = "pqc-key-exchange";
-                }
-            }
-            
-            ColorButton {
-                text: "Password Generator";
-                bg: Palette.blue;
-                height: 50px;
-                clicked => {
-                    // Reset all state when navigating
-                    file-path = ""; key-file-path = ""; output-file-path = "";
-                    password = ""; status-text = ""; generated-key-path = ""; generated-password = "";
-                    app-name = ""; app-password = ""; master-password = "";
-                    current-page = "password-vault";
+
+                Rectangle { vertical-stretch: 1; }
+
+                HorizontalBox {
+                    Rectangle { }
+                    IconButton {
+                        text: "Help";
+                        icon: @image-url("SVG/help.svg");
+                        bg: AppPalette.light_orange;
+                        width: 520px;
+                        height: 44px;
+                        icon-size: 18px;
+                        clicked => { current-page = "help-welcome"; }
+                    }
+                    Rectangle { }
                 }
             }
         }
         
         // File Encryption Page
-        if current-page == "file-encryption": VerticalBox {
-            spacing: 15px;
-            padding: 20px;
+        if current-page == "file-encryption": ScrollView {
+            VerticalBox {
+                spacing: 15px;
+                padding: 20px;
             
             HorizontalBox {
                 ColorButton {
                     text: "← Back";
-                    bg: Palette.light_purple;
+                    bg: AppPalette.light_purple;
                     clicked => {
                         // Reset and go home
                         file-path = ""; key-file-path = ""; output-file-path = "";
@@ -185,140 +419,241 @@ export component MainWindow inherits Window {
                     }
                 }
                 Rectangle { }
-                ColorButton {
-                    text: "Help?";
-                    bg: Palette.light_orange;
-                    clicked => { current-page = "help-file-encryption"; }
-                }
             }
-            
-            Text {
-                text: "File Encryption";
-                font-size: 20px;
-                font-weight: 600;
-                font-family: "Inter";
-            }
-            
-            ColorButton {
-                text: "Choose File";
-                bg: Palette.blue;
-                clicked => { choose-file(); }
-            }
-            
-            Text {
-                text: "Selected file: " + file-path;
-                wrap: word-wrap;
-            }
-            
+
+            Rectangle { }
+
             HorizontalBox {
-                spacing: 10px;
-                
-                LineEdit {
-                    placeholder-text: "Enter password";
-                    input-type: InputType.password;
-                    text <=> password;
+                Rectangle { }
+
+                VerticalBox {
+                    spacing: 15px;
+                    width: 520px;
+
+                    Text {
+                        text: "File Encryption";
+                        font-size: 20px;
+                        font-weight: 600;
+                        font-family: "Inter";
+                        horizontal-alignment: center;
+                    }
+
+                    HorizontalBox {
+                        Rectangle { }
+                        IconButtonRight {
+                            text: "Choose File";
+                            icon: @image-url("SVG/file.svg");
+                            bg: AppPalette.blue;
+                            clicked => { choose-file(); }
+                        }
+                        Rectangle { }
+                    }
+
+                    Text {
+                        text: "Selected file: " + file-path;
+                        wrap: word-wrap;
+                    }
+
+                    LineEdit {
+                        placeholder-text: "Enter password";
+                        input-type: InputType.password;
+                        text <=> password;
+                    }
+
+                    HorizontalBox {
+                        Rectangle { }
+                        IconButton {
+                            text: "Select Key File";
+                            icon: @image-url("SVG/key.svg");
+                            bg: AppPalette.blue;
+                            clicked => { select-key-file(); }
+                        }
+                        Rectangle { }
+                    }
+
+                    Text {
+                        text: "Key file: " + key-file-path;
+                        wrap: word-wrap;
+                    }
+
+                    VerticalBox {
+                        spacing: 12px;
+                        alignment: center;
+
+                        property <length> grid_w: 360px;
+                        property <length> tile: Math.min(160px, (grid_w - 12px) / 2);
+
+                        HorizontalBox {
+                            Rectangle { }
+                            HorizontalBox {
+                                spacing: 12px;
+                                width: grid_w;
+
+                                TileButton {
+                                    text: "Encrypt";
+                                    icon: @image-url("SVG/encrypt.svg");
+                                    bg: AppPalette.green;
+                                    radius: 28px;
+                                    icon-size: 56px;
+                                    text-size: 12px;
+                                    width: tile;
+                                    height: tile;
+                                    clicked => { encrypt-file(); }
+                                }
+
+                                TileButton {
+                                    text: "Decrypt";
+                                    icon: @image-url("SVG/decrypt.svg");
+                                    bg: AppPalette.red;
+                                    radius: 28px;
+                                    icon-size: 56px;
+                                    text-size: 12px;
+                                    width: tile;
+                                    height: tile;
+                                    clicked => { decrypt-file(); }
+                                }
+                            }
+                            Rectangle { }
+                        }
+                    }
+
+                    Text {
+                        text: "Output file: " + output-file-path;
+                        wrap: word-wrap;
+                    }
+
+                    HorizontalBox {
+                        Rectangle { }
+                        IconButton {
+                            text: "Help";
+                            icon: @image-url("SVG/help.svg");
+                            bg: AppPalette.light_orange;
+                            radius: 28px;
+                            width: parent.width;
+                            height: 44px;
+                            icon-size: 18px;
+                            clicked => { current-page = "help-file-encryption"; }
+                        }
+                        Rectangle { }
+                    }
                 }
-                
-                ColorButton {
-                    text: "Select Key File";
-                    bg: Palette.blue;
-                    clicked => { select-key-file(); }
-                }
+
+                Rectangle { }
             }
-            
-            Text {
-                text: "Key file: " + key-file-path;
-                wrap: word-wrap;
-            }
-            
-            HorizontalBox {
-                spacing: 10px;
-                
-                ColorButton {
-                    text: "Encrypt";
-                    bg: Palette.green;
-                    clicked => { encrypt-file(); }
-                }
-                
-                ColorButton {
-                    text: "Decrypt";
-                    bg: Palette.red;
-                    clicked => { decrypt-file(); }
-                }
-            }
-            
-            Text {
-                text: "Output file: " + output-file-path;
-                wrap: word-wrap;
+
+                Rectangle { }
             }
         }
         
         // PQC Key Exchange Page
-        if current-page == "pqc-key-exchange": VerticalBox {
-            spacing: 15px;
-            padding: 20px;
+        if current-page == "pqc-key-exchange": ScrollView {
+            VerticalBox {
+                spacing: 15px;
+                padding: 20px;
             
             HorizontalBox {
                 ColorButton {
                     text: "← Back";
-                    bg: Palette.light_purple;
+                    bg: AppPalette.light_purple;
                     clicked => { current-page = "welcome"; }
                 }
                 Rectangle { }
-                ColorButton {
-                    text: "Help?";
-                    bg: Palette.light_orange;
-                    clicked => { current-page = "help-pqc-mode"; }
-                }
             }
-            
-            Text {
-                text: "PQC Key Exchange";
-                font-size: 20px;
-                font-weight: 600;
-                font-family: "Inter";
-            }
-            
+
+            Rectangle { }
+
             HorizontalBox {
-                spacing: 10px;
-                
-                ColorButton {
-                    text: "Sender";
-                    bg: Palette.blue;
-                    height: 32px;
-                    clicked => {
-                        sender = true;
-                        current-page = "pqc-exchange-main";
-                        // Reset outputs
-                        key-file-path = ""; generated-key-path = "";
-                        status-text = "Step 1: Press 'Generate Key File' button to create 1.key";
+                Rectangle { }
+
+                VerticalBox {
+                    spacing: 15px;
+                    width: 520px;
+                    alignment: center;
+
+                    Text {
+                        text: "PQC Key Exchange";
+                        font-size: 20px;
+                        font-weight: 600;
+                        font-family: "Inter";
+                        horizontal-alignment: center;
+                    }
+
+                    VerticalBox {
+                        spacing: 12px;
+                        alignment: center;
+
+                        property <length> grid_w: 360px;
+                        property <length> tile: Math.min(180px, (grid_w - 12px) / 2);
+
+                        HorizontalBox {
+                            Rectangle { horizontal-stretch: 1; }
+                            HorizontalBox {
+                                spacing: 12px;
+                                width: grid_w;
+                                alignment: center;
+
+                                TileButton {
+                                    text: "Sender";
+                                    icon: @image-url("SVG/send.svg");
+                                    bg: AppPalette.blue;
+                                    radius: 28px;
+                                    icon-size: 56px;
+                                    text-size: 12px;
+                                    width: tile;
+                                    height: tile;
+                                    clicked => {
+                                        sender = true;
+                                        current-page = "pqc-exchange-main";
+                                        // Reset outputs
+                                        key-file-path = ""; generated-key-path = "";
+                                        status-text = "Step 1: Tap 'Start' to create 1.key";
+                                        pqc-action-text = "Start";
+                                        reset-pqc();
+                                    }
+                                }
+
+                                TileButton {
+                                    text: "Receiver";
+                                    icon: @image-url("SVG/receive.svg");
+                                    bg: AppPalette.blue;
+                                    radius: 28px;
+                                    icon-size: 56px;
+                                    text-size: 12px;
+                                    width: tile;
+                                    height: tile;
+                                    clicked => {
+                                        sender = false;
+                                        current-page = "pqc-exchange-main";
+                                        // Reset outputs
+                                        key-file-path = ""; generated-key-path = "";
+                                        status-text = "Step 1: Tap 'Open 1.key' from sender to generate 2.key";
+                                        pqc-action-text = "Open 1.key";
+                                        reset-pqc();
+                                    }
+                                }
+                            }
+                            Rectangle { horizontal-stretch: 1; }
+                        }
                     }
                 }
-                
-                ColorButton {
-                    text: "Receiver";
-                    bg: Palette.blue;
-                    height: 32px;
-                    clicked => {
-                        sender = false;
-                        current-page = "pqc-exchange-main";
-                        // Reset outputs
-                        key-file-path = ""; generated-key-path = "";
-                        status-text = "Step 1: Wait for sender's 1.key file. Once received, press 'Open Key File' button to load it";
-                    }
-                }
+
+                Rectangle { }
+            }
+
+                Rectangle { }
             }
         }
         
         // PQC Exchange Main Page
-        if current-page == "pqc-exchange-main": VerticalBox {
-            spacing: 15px;
-            padding: 20px;
+        if current-page == "pqc-exchange-main": ScrollView {
+            VerticalBox {
+                spacing: 15px;
+                padding: 20px;
             
             HorizontalBox {
                 ColorButton {
                     text: "← Back";
-                    bg: Palette.light_purple;
+                    bg: AppPalette.light_purple;
                     clicked => {
                         // Reset outputs
                         key-file-path = ""; generated-key-path = ""; status-text = "";
@@ -326,58 +661,86 @@ export component MainWindow inherits Window {
                     }
                 }
                 Rectangle { }
-                ColorButton {
-                    text: "Help?";
-                    bg: Palette.light_orange;
-                    clicked => { current-page = "help-pqc-exchange"; }
+            }
+
+            Rectangle { }
+
+            VerticalBox {
+                spacing: 15px;
+                alignment: center;
+
+                Text {
+                    text: "PQC Key Exchange";
+                    font-size: 20px;
+                    font-weight: 600;
+                    font-family: "Inter";
+                    horizontal-alignment: center;
+                }
+
+                Text {
+                    text: status-text;
+                    font-size: 14px;
+                    color: Palette.foreground;
+                    wrap: word-wrap;
+                    horizontal-alignment: center;
+                }
+
+                HorizontalBox {
+                    Rectangle { }
+                    HorizontalBox {
+                        spacing: 12px;
+                        width: 360px;
+                        alignment: center;
+
+                        ColorButton {
+                            text: pqc-action-text;
+                            bg: AppPalette.green;
+                            clicked => { open-key-file(); }
+                        }
+                    }
+                    Rectangle { }
+                }
+
+                Text {
+                    text: "Key file path: " + key-file-path;
+                    wrap: word-wrap;
+                }
+
+                Text {
+                    text: "Generated file path: " + generated-key-path;
+                    wrap: word-wrap;
                 }
             }
-            
-            Text {
-                text: "PQC Key Exchange";
-                font-size: 20px;
-                font-weight: 600;
-                font-family: "Inter";
+
+            HorizontalBox {
+                Rectangle { }
+                IconButton {
+                    text: "Help";
+                    icon: @image-url("SVG/help.svg");
+                    bg: AppPalette.light_orange;
+                    radius: 28px;
+                    width: 520px;
+                    height: 44px;
+                    icon-size: 18px;
+                    clicked => { current-page = "help-pqc-exchange"; }
+                }
+                Rectangle { }
             }
-            
-            Text {
-                text: status-text;
-                font-size: 16px;
-                color: #0066cc;
-            }
-            
-            ColorButton {
-                text: "Open Key File";
-                bg: Palette.blue;
-                clicked => { open-key-file(); }
-            }
-            
-            Text {
-                text: "Key file path: " + key-file-path;
-                wrap: word-wrap;
-            }
-            
-            ColorButton {
-                text: "Generate Key File";
-                bg: Palette.green;
-                clicked => { generate-key-file(); }
-            }
-            
-            Text {
-                text: "Generated file path: " + generated-key-path;
-                wrap: word-wrap;
-            }
+
+            Rectangle { }
+        }
         }
         
         // Password Generator and Vault Page
-        if current-page == "password-vault": VerticalBox {
-            spacing: 15px;
-            padding: 20px;
+        if current-page == "password-vault": ScrollView {
+            VerticalBox {
+                spacing: 15px;
+                padding: 20px;
             
             HorizontalBox {
                 ColorButton {
                     text: "← Back";
-                    bg: Palette.light_purple;
+                    bg: AppPalette.light_purple;
                     clicked => {
                         // Reset state and go home
                         file-path = ""; key-file-path = ""; output-file-path = "";
@@ -387,190 +750,279 @@ export component MainWindow inherits Window {
                     }
                 }
                 Rectangle { }
-                ColorButton {
-                    text: "Help?";
-                    bg: Palette.light_orange;
-                    clicked => { current-page = "help-password-generator"; }
-                }
             }
-            
-            Text {
-                text: "Password Generator";
-                font-size: 20px;
-                font-weight: 600;
-                font-family: "Inter";
-            }
-            
-            Text {
-                text: "Enter app/website name";
-                font-size: 14px;
-            }
-            
-            LineEdit {
-                placeholder-text: "App/Website name";
-                text <=> app-name;
-            }
-            
-            Text {
-                text: "Enter app/website password (optional)";
-                font-size: 14px;
-            }
-            
-            LineEdit {
-                placeholder-text: "App/Website password";
-                text <=> app-password;
-            }
-            
-            Text {
-                text: "Enter master password";
-                font-size: 14px;
-            }
-            
-            LineEdit {
-                placeholder-text: "Master password";
-                input-type: InputType.password;
-                text <=> master-password;
-            }
-            
+
+            Rectangle { }
+
             HorizontalBox {
-                spacing: 10px;
-                
-                ColorButton {
-                    text: "Generate Password";
-                    bg: Palette.green;
-                    clicked => { generate-password(); }
-                }
-                
-                ColorButton {
-                    text: "Settings";
-                    bg: Palette.blue;
-                    clicked => { current-page = "password-settings"; }
-                }
-            }
-            
-            // Generated password display
-            if generated-password != "": VerticalBox {
-                spacing: 10px;
-                
-                Text {
-                    text: "Generated Password:";
-                    font-size: 14px;
-                    font-weight: 600;
-                }
-                
-                Rectangle {
-                    border-width: 1px;
-                    border-color: #cccccc;
-                    border-radius: 4px;
-                    background: #f8f9fa;
-                    height: 40px;
-                    
+                Rectangle { }
+
+                VerticalBox {
+                    spacing: 15px;
+                    width: 520px;
+
                     Text {
-                        text: generated-password;
-                        font-size: 14px;
-                        font-family: "monospace";
-                        vertical-alignment: center;
+                        text: "Password Generator";
+                        font-size: 20px;
+                        font-weight: 600;
+                        font-family: "Inter";
                         horizontal-alignment: center;
-                        color: #2d3748;
+                    }
+
+                    Text {
+                        text: "Enter app/website name";
+                        font-size: 14px;
+                    }
+
+                    LineEdit {
+                        placeholder-text: "App/Website name";
+                        text <=> app-name;
+                    }
+
+                    Text {
+                        text: "Enter app/website password (optional)";
+                        font-size: 14px;
+                    }
+
+                    LineEdit {
+                        placeholder-text: "App/Website password";
+                        text <=> app-password;
+                    }
+
+                    Text {
+                        text: "Enter master password";
+                        font-size: 14px;
+                    }
+
+                    LineEdit {
+                        placeholder-text: "Master password";
+                        input-type: InputType.password;
+                        text <=> master-password;
+                    }
+
+                    // Generated password display
+                    if generated-password != "": VerticalBox {
+                        spacing: 10px;
+
+                        Text {
+                            text: "Generated Password:";
+                            font-size: 14px;
+                            font-weight: 600;
+                        }
+
+                        Rectangle {
+                            border-width: 1px;
+                            border-color: Palette.border;
+                            border-radius: 12px;
+                            background: Palette.alternate-background;
+                            height: 40px;
+
+                            Text {
+                                text: generated-password;
+                                font-size: 14px;
+                                font-family: "monospace";
+                                vertical-alignment: center;
+                                horizontal-alignment: center;
+                                color: Palette.alternate-foreground;
+                            }
+                        }
+                    }
+
+                    HorizontalBox {
+                        Rectangle { }
+                        HorizontalBox {
+                            spacing: 10px;
+                            alignment: center;
+
+                            TileButton {
+                                text: "Generate";
+                                icon: @image-url("SVG/key.svg");
+                                bg: AppPalette.green;
+                                radius: 28px;
+                                icon-size: 40px;
+                                text-size: 11px;
+                                width: 110px;
+                                height: 110px;
+                                clicked => { generate-password(); }
+                            }
+
+                            TileButton {
+                                text: "Settings";
+                                icon: @image-url("SVG/settings.svg");
+                                bg: AppPalette.blue;
+                                radius: 28px;
+                                icon-size: 40px;
+                                text-size: 11px;
+                                width: 110px;
+                                height: 110px;
+                                clicked => { current-page = "password-settings"; }
+                            }
+
+                            TileButton {
+                                text: "Erase";
+                                icon: @image-url("SVG/erase.svg");
+                                bg: generated-password != "" ? AppPalette.red : Palette.control-background;
+                                fg: #000000;
+                                radius: 28px;
+                                icon-size: 40px;
+                                text-size: 11px;
+                                width: 110px;
+                                height: 110px;
+                                clicked => { if generated-password != "" { erase-password(); } }
+                            }
+
+                            TileButton {
+                                text: "Copy";
+                                icon: @image-url("SVG/clipboard_copy.svg");
+                                bg: generated-password != "" ? AppPalette.blue : Palette.control-background;
+                                fg: #000000;
+                                radius: 28px;
+                                icon-size: 40px;
+                                text-size: 11px;
+                                width: 110px;
+                                height: 110px;
+                                clicked => { if generated-password != "" { copy-password(); } }
+                            }
+                        }
+                        Rectangle { }
+                    }
+
+                    HorizontalBox {
+                        Rectangle { }
+                        IconButton {
+                            text: "Help";
+                            icon: @image-url("SVG/help.svg");
+                            bg: AppPalette.light_orange;
+                            radius: 28px;
+                            width: 520px;
+                            height: 44px;
+                            icon-size: 18px;
+                            clicked => { current-page = "help-password-generator"; }
+                        }
+                        Rectangle { }
                     }
                 }
-                
-                Text {
-                    text: "Password generated successfully!";
-                    font-size: 12px;
-                    color: #28a745;
-                }
+
+                Rectangle { }
             }
+
+            Rectangle { }
+        }
         }
         
         // Password Settings Page
-        if current-page == "password-settings": VerticalBox {
-            spacing: 15px;
-            padding: 20px;
+        if current-page == "password-settings": ScrollView {
+            VerticalBox {
+                spacing: 15px;
+                padding: 20px;
             
             HorizontalBox {
                 ColorButton {
                     text: "← Back";
-                    bg: Palette.light_purple;
+                    bg: AppPalette.light_purple;
                     clicked => { current-page = "password-vault"; }
                 }
                 Rectangle { }
-                ColorButton {
-                    text: "Help?";
-                    bg: Palette.light_orange;
+            }
+
+            Rectangle { }
+
+            HorizontalBox {
+                Rectangle { }
+
+                VerticalBox {
+                    spacing: 15px;
+                    width: 520px;
+
+                    Text {
+                        text: "Password Settings";
+                        font-size: 20px;
+                        font-weight: 600;
+                        font-family: "Inter";
+                        horizontal-alignment: center;
+                    }
+
+                    Text {
+                        text: "Choose password length";
+                        font-size: 14px;
+                    }
+
+                    Slider {
+                        value <=> password-length;
+                        minimum: 8;
+                        maximum: 64;
+                    }
+
+                    Text {
+                        text: "Length: " + password-length;
+                        font-size: 14px;
+                    }
+
+                    Text {
+                        text: "Choose which character sets you want";
+                        font-size: 14px;
+                    }
+                    Text {
+                        text: "Lowercase (a-z), Uppercase (A-Z) and Numbers (0-9) are always included.";
+                        font-size: 12px;
+                        color: Palette.foreground;
+                    }
+
+                    VerticalBox {
+                        spacing: 8px;
+
+                        HorizontalBox {
+                            CheckBox {
+                                checked <=> set1-enabled;
+                            }
+                            Text {
+                                text: "Special Set 1: ~!@#$%^&*()";
+                                vertical-alignment: center;
+                            }
+                        }
+
+                        HorizontalBox {
+                            CheckBox {
+                                checked <=> set2-enabled;
+                            }
+                            Text {
+                                text: "Special Set 2: /.,';][=-";
+                                vertical-alignment: center;
+                            }
+                        }
+
+                        HorizontalBox {
+                            CheckBox {
+                                checked <=> set3-enabled;
+                            }
+                            Text {
+                                text: "Special Set 3: ><\":}{+_";
+                                vertical-alignment: center;
+                            }
+                        }
+                    }
+                }
+
+                Rectangle { }
+            }
+
+            HorizontalBox {
+                Rectangle { }
+                IconButton {
+                    text: "Help";
+                    icon: @image-url("SVG/help.svg");
+                    bg: AppPalette.light_orange;
+                    radius: 28px;
+                    width: 520px;
+                    height: 44px;
+                    icon-size: 18px;
                     clicked => { current-page = "help-password-settings"; }
                 }
+                Rectangle { }
             }
-            
-            Text {
-                text: "Password Settings";
-                font-size: 20px;
-                font-weight: 600;
-                font-family: "Inter";
-            }
-            
-            Text {
-                text: "Choose password length";
-                font-size: 14px;
-            }
-            
-            Slider {
-                minimum: 8;
-                maximum: 64;
-                value: password-length;
-                changed(val) => {
-                    password-length = Math.round(val);
-                }
-            }
-            
-            Text {
-                text: "Length: " + password-length;
-                font-size: 14px;
-            }
-            
-            Text {
-                text: "Choose which character sets you want";
-                font-size: 14px;
-            }
-            Text {
-                text: "Lowercase (a-z), Uppercase (A-Z) and Numbers (0-9) are always included.";
-                font-size: 12px;
-                color: #666666;
-            }
-            
-            VerticalBox {
-                spacing: 8px;
-                
-                HorizontalBox {
-                    CheckBox {
-                        checked <=> set1-enabled;
-                    }
-                    Text {
-                        text: "Special Set 1: ~!@#$%^&*()";
-                        vertical-alignment: center;
-                    }
-                }
-                
-                HorizontalBox {
-                    CheckBox {
-                        checked <=> set2-enabled;
-                    }
-                    Text {
-                        text: "Special Set 2: /.,';][=-";
-                        vertical-alignment: center;
-                    }
-                }
-                
-                HorizontalBox {
-                    CheckBox {
-                        checked <=> set3-enabled;
-                    }
-                    Text {
-                        text: "Special Set 3: ><\":}{+_";
-                        vertical-alignment: center;
-                    }
-                }
-            }
+
+            Rectangle { }
+        }
         }
 
         // Welcome Help Page (basic)
@@ -582,7 +1034,7 @@ export component MainWindow inherits Window {
                 HorizontalBox {
                     ColorButton {
                         text: "← Back";
-                        bg: Palette.light_purple;
+                        bg: AppPalette.light_purple;
                         clicked => { current-page = "welcome"; }
                     }
                     Rectangle { }
@@ -600,7 +1052,7 @@ export component MainWindow inherits Window {
         if current-page == "help-file-encryption": ScrollView {
             VerticalBox {
                 spacing: 12px; padding: 20px;
-                HorizontalBox { ColorButton { text: "← Back"; bg: Palette.light_purple; clicked => { current-page = "file-encryption"; } } Rectangle { } }
+                HorizontalBox { ColorButton { text: "← Back"; bg: AppPalette.light_purple; clicked => { current-page = "file-encryption"; } } Rectangle { } }
                 Text { text: "File Encryption Help"; font-size: 20px; font-weight: 600; font-family: "Inter"; }
                 Text { text: "• Choose File: Select the file to encrypt or decrypt."; wrap: word-wrap; }
                 Text { text: "• Enter password OR Select Key File: Provide exactly one of them."; wrap: word-wrap; }
@@ -613,7 +1065,7 @@ export component MainWindow inherits Window {
         if current-page == "help-pqc-mode": ScrollView {
             VerticalBox {
                 spacing: 12px; padding: 20px;
-                HorizontalBox { ColorButton { text: "← Back"; bg: Palette.light_purple; clicked => { current-page = "pqc-key-exchange"; } } Rectangle { } }
+                HorizontalBox { ColorButton { text: "← Back"; bg: AppPalette.light_purple; clicked => { current-page = "pqc-key-exchange"; } } Rectangle { } }
                 Text { text: "PQC Key Exchange Help"; font-size: 20px; font-weight: 600; font-family: "Inter"; }
                 Text { text: "• Sender: Start exchange and create 1.key, send to Receiver."; wrap: word-wrap; }
                 Text { text: "• Receiver: Open 1.key → generate 2.key → send 2.key to Sender."; wrap: word-wrap; }
@@ -624,7 +1076,7 @@ export component MainWindow inherits Window {
         if current-page == "help-pqc-exchange": ScrollView {
             VerticalBox {
                 spacing: 12px; padding: 20px;
-                HorizontalBox { ColorButton { text: "← Back"; bg: Palette.light_purple; clicked => { current-page = "pqc-exchange-main"; } } Rectangle { } }
+                HorizontalBox { ColorButton { text: "← Back"; bg: AppPalette.light_purple; clicked => { current-page = "pqc-exchange-main"; } } Rectangle { } }
                 Text { text: "Exchange Steps"; font-size: 20px; font-weight: 600; font-family: "Inter"; }
                 Text { text: "• Sender: Generate 1.key → send to Receiver. Then open 2.key → generate 3.key → send 3.key to Receiver."; wrap: word-wrap; }
                 Text { text: "• Receiver: Open 1.key → generate 2.key → send 2.key to Sender. Then open 3.key → app saves final.key."; wrap: word-wrap; }
@@ -635,7 +1087,7 @@ export component MainWindow inherits Window {
         if current-page == "help-password-generator": ScrollView {
             VerticalBox {
                 spacing: 12px; padding: 20px;
-                HorizontalBox { ColorButton { text: "← Back"; bg: Palette.light_purple; clicked => { current-page = "password-vault"; } } Rectangle { } }
+                HorizontalBox { ColorButton { text: "← Back"; bg: AppPalette.light_purple; clicked => { current-page = "password-vault"; } } Rectangle { } }
                 Text { text: "Password Generator Help"; font-size: 20px; font-weight: 600; font-family: "Inter"; }
                 Text { text: "• Enter App/Website name, optional App password, and required Master password."; wrap: word-wrap; }
                 Text { text: "• Generate Password (green): Deterministic password compatible with Android."; wrap: word-wrap; }
@@ -647,7 +1099,7 @@ export component MainWindow inherits Window {
         if current-page == "help-password-settings": ScrollView {
             VerticalBox {
                 spacing: 12px; padding: 20px;
-                HorizontalBox { ColorButton { text: "← Back"; bg: Palette.light_purple; clicked => { current-page = "password-settings"; } } Rectangle { } }
+                HorizontalBox { ColorButton { text: "← Back"; bg: AppPalette.light_purple; clicked => { current-page = "password-settings"; } } Rectangle { } }
                 Text { text: "Password Settings Help"; font-size: 20px; font-weight: 600; font-family: "Inter"; }
                 Text { text: "• Length slider: 8 to 64 characters."; wrap: word-wrap; }
                 Text { text: "• Special Set 1: ~!@#$%^&*()"; }
@@ -658,14 +1110,15 @@ export component MainWindow inherits Window {
         }
         
         // Secure Share Main Page
-        if current-page == "secure-share": VerticalBox {
-            spacing: 15px;
-            padding: 20px;
+        if current-page == "secure-share": ScrollView {
+            VerticalBox {
+                spacing: 15px;
+                padding: 20px;
             
             HorizontalBox {
                 ColorButton {
                     text: "← Back";
-                    bg: Palette.light_purple;
+                    bg: AppPalette.light_purple;
                     clicked => {
                         // Reset and go home
                         file-path = ""; key-file-path = ""; output-file-path = "";
@@ -676,357 +1129,522 @@ export component MainWindow inherits Window {
                     }
                 }
                 Rectangle { }
-                ColorButton {
-                    text: "Help?";
-                    bg: Palette.light_orange;
+            }
+
+            Rectangle { }
+
+            HorizontalBox {
+                Rectangle { }
+
+                VerticalBox {
+                    spacing: 15px;
+                    width: 520px;
+                    alignment: center;
+
+                    Text {
+                        text: "Secure Share";
+                        font-size: 20px;
+                        font-weight: 600;
+                        font-family: "Inter";
+                        horizontal-alignment: center;
+                    }
+
+                    Text {
+                        text: "Choose sharing mode:";
+                        font-size: 16px;
+                        horizontal-alignment: center;
+                    }
+
+                    VerticalBox {
+                        spacing: 12px;
+                        alignment: center;
+
+                        property <length> grid_w: 360px;
+                        property <length> tile: Math.min(180px, (grid_w - 12px) / 2);
+
+                        HorizontalBox {
+                            Rectangle { }
+                            HorizontalBox {
+                                spacing: 12px;
+                                width: grid_w;
+
+                                TileButton {
+                                    text: "Text Sharing";
+                                    icon: @image-url("SVG/text.svg");
+                                    bg: AppPalette.blue;
+                                    radius: 28px;
+                                    icon-size: 56px;
+                                    text-size: 12px;
+                                    width: tile;
+                                    height: tile;
+                                    clicked => {
+                                        secure-share-mode = "text";
+                                        current-page = "secure-share-role";
+                                    }
+                                }
+
+                                TileButton {
+                                    text: "File Sharing";
+                                    icon: @image-url("SVG/file.svg");
+                                    bg: AppPalette.blue;
+                                    radius: 28px;
+                                    icon-size: 56px;
+                                    text-size: 12px;
+                                    width: tile;
+                                    height: tile;
+                                    clicked => {
+                                        secure-share-mode = "file";
+                                        current-page = "secure-share-role";
+                                    }
+                                }
+                            }
+                            Rectangle { }
+                        }
+                    }
+                }
+
+                Rectangle { }
+            }
+
+            HorizontalBox {
+                Rectangle { }
+                IconButton {
+                    text: "Help";
+                    icon: @image-url("SVG/help.svg");
+                    bg: AppPalette.light_orange;
+                    radius: 28px;
+                    width: 520px;
+                    height: 44px;
+                    icon-size: 18px;
                     clicked => { current-page = "help-secure-share"; }
                 }
+                Rectangle { }
             }
-            
-            Text {
-                text: "Secure Share";
-                font-size: 20px;
-                font-weight: 600;
-                font-family: "Inter";
-            }
-            
-            Text {
-                text: "Choose sharing mode:";
-                font-size: 16px;
-            }
-            
-            HorizontalBox {
-                spacing: 10px;
-                
-                ColorButton {
-                    text: "Text Sharing";
-                    bg: secure-share-mode == "text" ? Palette.green : Palette.blue;
-                    height: 40px;
-                    clicked => {
-                        secure-share-mode = "text";
-                        current-page = "secure-share-role";
-                    }
-                }
-                
-                ColorButton {
-                    text: "File Sharing";
-                    bg: secure-share-mode == "file" ? Palette.green : Palette.blue;
-                    height: 40px;
-                    clicked => {
-                        secure-share-mode = "file";
-                        current-page = "secure-share-role";
-                    }
-                }
-            }
+
+            Rectangle { }
+        }
         }
         
         // Secure Share Role Selection
-        if current-page == "secure-share-role": VerticalBox {
-            spacing: 15px;
-            padding: 20px;
+        if current-page == "secure-share-role": ScrollView {
+            VerticalBox {
+                spacing: 15px;
+                padding: 20px;
             
             HorizontalBox {
                 ColorButton {
                     text: "← Back";
-                    bg: Palette.light_purple;
+                    bg: AppPalette.light_purple;
                     clicked => { current-page = "secure-share"; }
                 }
                 Rectangle { }
-                ColorButton {
-                    text: "Help?";
-                    bg: Palette.light_orange;
+            }
+
+            Rectangle { }
+
+            HorizontalBox {
+                Rectangle { }
+
+                VerticalBox {
+                    spacing: 15px;
+                    width: 520px;
+                    alignment: center;
+
+                    Text {
+                        text: "Secure Share - " + (secure-share-mode == "text" ? "Text Sharing" : "File Sharing");
+                        font-size: 20px;
+                        font-weight: 600;
+                        font-family: "Inter";
+                        horizontal-alignment: center;
+                    }
+
+                    Text {
+                        text: "Choose your role:";
+                        font-size: 16px;
+                        horizontal-alignment: center;
+                    }
+
+                    VerticalBox {
+                        spacing: 12px;
+                        alignment: center;
+
+                        property <length> grid_w: 360px;
+                        property <length> tile: Math.min(180px, (grid_w - 12px) / 2);
+
+                        HorizontalBox {
+                            Rectangle { }
+                            HorizontalBox {
+                                spacing: 12px;
+                                width: grid_w;
+
+                                TileButton {
+                                    text: "Sender";
+                                    icon: @image-url("SVG/send.svg");
+                                    bg: AppPalette.blue;
+                                    radius: 28px;
+                                    icon-size: 56px;
+                                    text-size: 12px;
+                                    width: tile;
+                                    height: tile;
+                                    clicked => {
+                                        sender = true;
+                                        current-page = "secure-share-sender";
+                                        // Clear all labels and text inputs
+                                        secure-share-status = secure-share-mode == "text" ? 
+                                            "Step 1: Enter your text message below, then press 'Start'" : 
+                                            "Step 1: Press 'Choose File' to select a file, then press 'Start'";
+                                        secure-share-action-text = "Start";
+                                        key-file-path = "";
+                                        generated-key-path = "";
+                                        file-path = "";
+                                        output-file-path = "";
+                                        secure-share-text = "";
+                                        received-text = "";
+                                        secure-share-reset();
+                                    }
+                                }
+
+                                TileButton {
+                                    text: "Receiver";
+                                    icon: @image-url("SVG/receive.svg");
+                                    bg: AppPalette.blue;
+                                    radius: 28px;
+                                    icon-size: 56px;
+                                    text-size: 12px;
+                                    width: tile;
+                                    height: tile;
+                                    clicked => {
+                                        sender = false;
+                                        current-page = "secure-share-receiver";
+                                        // Clear all labels and text inputs
+                                        secure-share-status = "Step 1: Wait for sender to share their key files and encrypted content with you";
+                                        secure-share-action-text = "Open 1.key";
+                                        key-file-path = "";
+                                        generated-key-path = "";
+                                        file-path = "";
+                                        output-file-path = "";
+                                        received-text = "";
+                                        secure-share-text = "";
+                                        secure-share-start-receiver(); // Reset backend state
+                                    }
+                                }
+                            }
+                            Rectangle { }
+                        }
+                    }
+                }
+
+                Rectangle { }
+            }
+
+            HorizontalBox {
+                Rectangle { }
+                IconButton {
+                    text: "Help";
+                    icon: @image-url("SVG/help.svg");
+                    bg: AppPalette.light_orange;
+                    radius: 28px;
+                    width: 520px;
+                    height: 44px;
+                    icon-size: 18px;
                     clicked => { current-page = "help-secure-share"; }
                 }
+                Rectangle { }
             }
-            
-            Text {
-                text: "Secure Share - " + (secure-share-mode == "text" ? "Text Sharing" : "File Sharing");
-                font-size: 20px;
-                font-weight: 600;
-                font-family: "Inter";
-            }
-            
-            Text {
-                text: "Choose your role:";
-                font-size: 16px;
-            }
-            
-            HorizontalBox {
-                spacing: 10px;
-                
-                ColorButton {
-                    text: "Sender";
-                    bg: Palette.blue;
-                    height: 40px;
-                    clicked => {
-                        sender = true;
-                        current-page = "secure-share-sender";
-                        // Clear all labels and text inputs
-                        secure-share-status = secure-share-mode == "text" ? 
-                            "Step 1: Enter your text message below, then press 'Start Sender' button" : 
-                            "Step 1: Press 'Choose File' to select a file, then press 'Start Sender' button";
-                        key-file-path = "";
-                        generated-key-path = "";
-                        file-path = "";
-                        output-file-path = "";
-                        secure-share-text = "";
-                        received-text = "";
-                    }
-                }
-                
-                ColorButton {
-                    text: "Receiver";
-                    bg: Palette.blue;
-                    height: 40px;
-                    clicked => {
-                        sender = false;
-                        current-page = "secure-share-receiver";
-                        // Clear all labels and text inputs
-                        secure-share-status = "Step 1: Wait for sender to share their key files and encrypted content with you";
-                        key-file-path = "";
-                        generated-key-path = "";
-                        file-path = "";
-                        output-file-path = "";
-                        received-text = "";
-                        secure-share-text = "";
-                        secure-share-start-receiver(); // Reset backend state
-                    }
-                }
-            }
+
+            Rectangle { }
+        }
         }
         
         // Secure Share Sender Page
-        if current-page == "secure-share-sender": VerticalBox {
-            spacing: 15px;
-            padding: 20px;
+        if current-page == "secure-share-sender": ScrollView {
+            VerticalBox {
+                spacing: 15px;
+                padding: 20px;
             
             HorizontalBox {
                 ColorButton {
                     text: "← Back";
-                    bg: Palette.light_purple;
+                    bg: AppPalette.light_purple;
                     clicked => { current-page = "secure-share-role"; }
                 }
                 Rectangle { }
-                ColorButton {
-                    text: "Help?";
-                    bg: Palette.light_orange;
+            }
+
+            Rectangle { }
+
+            HorizontalBox {
+                Rectangle { }
+
+                VerticalBox {
+                    spacing: 15px;
+                    width: 520px;
+
+                    Text {
+                        text: "Secure Share - Sender (" + (secure-share-mode == "text" ? "Text" : "File") + ")";
+                        font-size: 20px;
+                        font-weight: 600;
+                        font-family: "Inter";
+                        horizontal-alignment: center;
+                    }
+
+                    Text {
+                        text: secure-share-status;
+                        font-size: 14px;
+                        color: AppPalette.blue;
+                        wrap: word-wrap;
+                    }
+
+                    HorizontalBox {
+                        Rectangle { }
+                        IconButton {
+                            text: "Choose Key Files Location";
+                            icon: @image-url("SVG/file.svg");
+                            bg: AppPalette.light_orange;
+                            clicked => { secure-share-choose-key-folder(); }
+                        }
+                        Rectangle { }
+                    }
+
+                    if secure-share-mode == "text": VerticalBox {
+                        spacing: 10px;
+
+                        Text {
+                            text: "Enter text to share:";
+                            font-size: 14px;
+                        }
+
+                        Rectangle {
+                            border-width: 1px;
+                            border-color: Palette.border;
+                            border-radius: 12px;
+                            background: Palette.alternate-background;
+                            height: 80px;
+
+                            TextInput {
+                                text <=> secure-share-text;
+                                wrap: word-wrap;
+                                width: parent.width - 10px;
+                                height: parent.height - 10px;
+                                x: 5px;
+                                y: 5px;
+                                color: Palette.alternate-foreground;
+                                font-size: 14px;
+                            }
+
+                            if secure-share-text == "": Text {
+                                text: "Enter your message here...";
+                                color: Palette.alternate-foreground;
+                                x: 8px;
+                                y: 8px;
+                                font-size: 14px;
+                            }
+                        }
+                    }
+
+                    if secure-share-mode == "file": VerticalBox {
+                        spacing: 10px;
+
+                        HorizontalBox {
+                            Rectangle { }
+                            IconButton {
+                                text: "Choose File to Share";
+                                icon: @image-url("SVG/file.svg");
+                                bg: AppPalette.blue;
+                                clicked => { secure-share-choose-file(); }
+                            }
+                            Rectangle { }
+                        }
+
+                        Text {
+                            text: "Selected file: " + file-path;
+                            wrap: word-wrap;
+                            font-size: 12px;
+                        }
+                    }
+
+                    ColorButton {
+                        text: secure-share-action-text;
+                        bg: AppPalette.green;
+                        clicked => { secure-share-action(); }
+                    }
+
+                    Text {
+                        text: "Key file path: " + key-file-path;
+                        wrap: word-wrap;
+                        font-size: 12px;
+                    }
+
+                    Text {
+                        text: "Generated file path: " + generated-key-path;
+                        wrap: word-wrap;
+                        font-size: 12px;
+                    }
+
+                    Text {
+                        text: "Output file: " + output-file-path;
+                        wrap: word-wrap;
+                        font-size: 12px;
+                    }
+                }
+
+                Rectangle { }
+            }
+
+            HorizontalBox {
+                Rectangle { }
+                IconButton {
+                    text: "Help";
+                    icon: @image-url("SVG/help.svg");
+                    bg: AppPalette.light_orange;
+                    radius: 28px;
+                    width: 520px;
+                    height: 44px;
+                    icon-size: 18px;
                     clicked => { current-page = "help-secure-share"; }
                 }
+                Rectangle { }
             }
-            
-            Text {
-                text: "Secure Share - Sender (" + (secure-share-mode == "text" ? "Text" : "File") + ")";
-                font-size: 20px;
-                font-weight: 600;
-                font-family: "Inter";
-            }
-            
-            Text {
-                text: secure-share-status;
-                font-size: 14px;
-                color: #0066cc;
-                wrap: word-wrap;
-            }
-            
-            ColorButton {
-                text: "📁 Choose Key Files Location";
-                bg: Palette.light_orange;
-                clicked => { secure-share-choose-key-folder(); }
-            }
-            
-            if secure-share-mode == "text": VerticalBox {
-                spacing: 10px;
-                
-                Text {
-                    text: "Enter text to share:";
-                    font-size: 14px;
-                }
-                
-                Rectangle {
-                    border-width: 1px;
-                    border-color: #cccccc;
-                    border-radius: 4px;
-                    background: #ffffff;
-                    height: 80px;
-                    
-                    TextInput {
-                        text <=> secure-share-text;
-                        wrap: word-wrap;
-                        width: parent.width - 10px;
-                        height: parent.height - 10px;
-                        x: 5px;
-                        y: 5px;
-                        color: #000000;
-                        font-size: 14px;
-                    }
-                    
-                    if secure-share-text == "": Text {
-                        text: "Enter your message here...";
-                        color: #999999;
-                        x: 8px;
-                        y: 8px;
-                        font-size: 14px;
-                    }
-                }
-            }
-            
-            if secure-share-mode == "file": VerticalBox {
-                spacing: 10px;
-                
-                ColorButton {
-                    text: "Choose File to Share";
-                    bg: Palette.blue;
-                    clicked => { secure-share-choose-file(); }
-                }
-                
-                Text {
-                    text: "Selected file: " + file-path;
-                    wrap: word-wrap;
-                    font-size: 12px;
-                }
-            }
-            
-            ColorButton {
-                text: secure-share-mode == "text" ? "Step 1: Ready to Send Text" : "Step 1: Start Key Exchange";
-                bg: Palette.green;
-                clicked => { secure-share-start-sender(); }
-            }
-            
-            Text {
-                text: "Key file path: " + key-file-path;
-                wrap: word-wrap;
-                font-size: 12px;
-            }
-            
-            ColorButton {
-                text: "Step 2: Open 2.key & Auto-Generate 3.key";
-                bg: Palette.blue;
-                clicked => { secure-share-open-key(); }
-            }
-            
-            Text {
-                text: "Generated file path: " + generated-key-path;
-                wrap: word-wrap;
-                font-size: 12px;
-            }
-            
-            Text {
-                text: "Output file: " + output-file-path;
-                wrap: word-wrap;
-                font-size: 12px;
-            }
+
+            Rectangle { }
+        }
+
         }
         
         // Secure Share Receiver Page
-        if current-page == "secure-share-receiver": VerticalBox {
-            spacing: 15px;
-            padding: 20px;
+        if current-page == "secure-share-receiver": ScrollView {
+            VerticalBox {
+                spacing: 15px;
+                padding: 20px;
             
             HorizontalBox {
                 ColorButton {
                     text: "← Back";
-                    bg: Palette.light_purple;
+                    bg: AppPalette.light_purple;
                     clicked => { current-page = "secure-share-role"; }
                 }
                 Rectangle { }
-                ColorButton {
-                    text: "Help?";
-                    bg: Palette.light_orange;
-                    clicked => { current-page = "help-secure-share"; }
-                }
             }
-            
-            Text {
-                text: "Secure Share - Receiver (" + (secure-share-mode == "text" ? "Text" : "File") + ")";
-                font-size: 20px;
-                font-weight: 600;
-                font-family: "Inter";
-            }
-            
-            Text {
-                text: secure-share-status;
-                font-size: 14px;
-                color: #0066cc;
-                wrap: word-wrap;
-            }
-            
-            ColorButton {
-                text: "📁 Choose Key Files Location";
-                bg: Palette.light_orange;
-                clicked => { secure-share-choose-key-folder(); }
-            }
-            
-            ColorButton {
-                text: "Step 1: Open 1.key & Auto-Generate 2.key";
-                bg: Palette.blue;
-                clicked => { secure-share-open-key(); }
-            }
-            
-            Text {
-                text: "Key file path: " + key-file-path;
-                wrap: word-wrap;
-                font-size: 12px;
-            }
-            
-            Text {
-                text: "Generated file path: " + generated-key-path;
-                wrap: word-wrap;
-                font-size: 12px;
-            }
-            
-            ColorButton {
-                text: "Step 3: Open 3.key";
-                bg: Palette.blue;
-                clicked => { secure-share-open-key(); }
-            }
-            
-            ColorButton {
-                text: "Step 4: Choose Encrypted File & Auto-Decrypt";
-                bg: Palette.green;
-                clicked => { secure-share-choose-file(); }
-            }
-            
-            Text {
-                text: "Encrypted file: " + file-path;
-                wrap: word-wrap;
-                font-size: 12px;
-            }
-            
-            Text {
-                text: "Decrypted file: " + output-file-path;
-                wrap: word-wrap;
-                font-size: 12px;
-            }
-            
-            if secure-share-mode == "text" && received-text != "": VerticalBox {
-                spacing: 10px;
-                
-                Text {
-                    text: "Received Message:";
-                    font-size: 16px;
-                    font-weight: 600;
-                }
-                
-                Rectangle {
-                    border-width: 1px;
-                    border-color: #cccccc;
-                    border-radius: 4px;
-                    background: #f8f9fa;
-                    min-height: 80px;
-                    
+
+            Rectangle { }
+
+            HorizontalBox {
+                Rectangle { }
+
+                VerticalBox {
+                    spacing: 15px;
+                    width: 520px;
+
                     Text {
-                        text: received-text;
+                        text: "Secure Share - Receiver (" + (secure-share-mode == "text" ? "Text" : "File") + ")";
+                        font-size: 20px;
+                        font-weight: 600;
+                        font-family: "Inter";
+                        horizontal-alignment: center;
+                    }
+
+                    Text {
+                        text: secure-share-status;
+                        font-size: 14px;
+                        color: AppPalette.blue;
                         wrap: word-wrap;
-                        vertical-alignment: top;
-                        horizontal-alignment: left;
-                        x: 10px;
-                        y: 10px;
-                        width: parent.width - 20px;
-                        height: parent.height - 20px;
-                        color: #2d3748;
+                    }
+
+                    HorizontalBox {
+                        Rectangle { }
+                        IconButton {
+                            text: "Choose Key Files Location";
+                            icon: @image-url("SVG/file.svg");
+                            bg: AppPalette.light_orange;
+                            clicked => { secure-share-choose-key-folder(); }
+                        }
+                        Rectangle { }
+                    }
+
+                    ColorButton {
+                        text: secure-share-action-text;
+                        bg: AppPalette.green;
+                        clicked => { secure-share-action(); }
+                    }
+
+                    Text {
+                        text: "Key file path: " + key-file-path;
+                        wrap: word-wrap;
+                        font-size: 12px;
+                    }
+
+                    Text {
+                        text: "Generated file path: " + generated-key-path;
+                        wrap: word-wrap;
+                        font-size: 12px;
+                    }
+
+                    
+
+                    Text {
+                        text: "Encrypted file: " + file-path;
+                        wrap: word-wrap;
+                        font-size: 12px;
+                    }
+
+                    Text {
+                        text: "Decrypted file: " + output-file-path;
+                        wrap: word-wrap;
+                        font-size: 12px;
+                    }
+
+                    if secure-share-mode == "text" && received-text != "": VerticalBox {
+                        spacing: 10px;
+
+                        Text {
+                            text: "Received Message:";
+                            font-size: 16px;
+                            font-weight: 600;
+                        }
+
+                        Rectangle {
+                            border-width: 1px;
+                            border-color: Palette.border;
+                            border-radius: 12px;
+                            background: Palette.alternate-background;
+                            min-height: 80px;
+
+                            Text {
+                                text: received-text;
+                                wrap: word-wrap;
+                                vertical-alignment: top;
+                                horizontal-alignment: left;
+                                x: 10px;
+                                y: 10px;
+                                width: parent.width - 20px;
+                                height: parent.height - 20px;
+                                color: Palette.alternate-foreground;
+                            }
+                        }
                     }
                 }
+
+                Rectangle { }
             }
+
+            HorizontalBox {
+                Rectangle { }
+                IconButton {
+                    text: "Help";
+                    icon: @image-url("SVG/help.svg");
+                    bg: AppPalette.light_orange;
+                    radius: 28px;
+                    width: 520px;
+                    height: 44px;
+                    icon-size: 18px;
+                    clicked => { current-page = "help-secure-share"; }
+                }
+                Rectangle { }
+            }
+
+            Rectangle { }
+        }
+
         }
         
         // Secure Share Help Page
@@ -1038,7 +1656,7 @@ export component MainWindow inherits Window {
                 HorizontalBox {
                     ColorButton {
                         text: "← Back";
-                        bg: Palette.light_purple;
+                        bg: AppPalette.light_purple;
                         clicked => { current-page = "secure-share"; }
                     }
                     Rectangle { }

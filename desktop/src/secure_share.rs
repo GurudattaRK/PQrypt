@@ -1,4 +1,5 @@
-use std::fs;
+use std::fs::{self, File};
+use std::io::{Read, Seek, SeekFrom, Write};
 use zeroize::Zeroize;
 
 use crate::rusty_api;
@@ -10,6 +11,7 @@ pub struct SecureShareState {
     pub mode: String,
     pub step: u8,
     pub key_output_dir: String,
+    final_key: Option<[u8; rusty_api::ARGON2_OUTPUT_SIZE]>,
 }
 
 pub struct PqcState {
@@ -44,6 +46,7 @@ impl SecureShareState {
             mode: "file".to_string(),
             step: 0,
             key_output_dir: default_dir,
+            final_key: None,
         }
     }
 
@@ -54,9 +57,20 @@ impl SecureShareState {
             let _ = fs::remove_file(temp_file);
         }
         self.temp_text_file = None;
+        if let Some(mut k) = self.final_key.take() {
+            k.zeroize();
+        }
         self.is_sender = false;
         self.mode = "file".to_string();
         self.step = 0;
+    }
+
+    #[inline(always)]
+    pub fn reset_flow(&mut self, mode: &str) {
+        let dir = self.key_output_dir.clone();
+        self.reset();
+        self.key_output_dir = dir;
+        self.mode = mode.to_string();
     }
 
     #[inline(always)]
@@ -78,16 +92,64 @@ impl SecureShareState {
 pub struct SecureShareResult {
     pub success: bool,
     pub message: String,
-    pub file_path: Option<String>,
+    pub key_path: Option<String>,
+    pub out_path: Option<String>,
+    pub text: Option<String>,
 }
 
 impl SecureShareResult {
     #[inline(always)]
-    pub fn success(message: &str, file_path: Option<String>) -> Self {
+    pub fn success(message: &str) -> Self {
         Self {
             success: true,
             message: message.to_string(),
-            file_path,
+            key_path: None,
+            out_path: None,
+            text: None,
+        }
+    }
+
+    #[inline(always)]
+    pub fn key(message: &str, key_path: String) -> Self {
+        Self {
+            success: true,
+            message: message.to_string(),
+            key_path: Some(key_path),
+            out_path: None,
+            text: None,
+        }
+    }
+
+    #[inline(always)]
+    pub fn out(message: &str, out_path: String) -> Self {
+        Self {
+            success: true,
+            message: message.to_string(),
+            key_path: None,
+            out_path: Some(out_path),
+            text: None,
+        }
+    }
+
+    #[inline(always)]
+    pub fn key_out(message: &str, key_path: String, out_path: String) -> Self {
+        Self {
+            success: true,
+            message: message.to_string(),
+            key_path: Some(key_path),
+            out_path: Some(out_path),
+            text: None,
+        }
+    }
+
+    #[inline(always)]
+    pub fn text(message: &str, text: String) -> Self {
+        Self {
+            success: true,
+            message: message.to_string(),
+            key_path: None,
+            out_path: None,
+            text: Some(text),
         }
     }
 
@@ -96,15 +158,25 @@ impl SecureShareResult {
         Self {
             success: false,
             message: message.to_string(),
-            file_path: None,
+            key_path: None,
+            out_path: None,
+            text: None,
         }
     }
 }
 
 #[inline(always)]
 pub fn start_sender(state: &mut SecureShareState, text_content: Option<&str>, file_path: Option<&str>) -> SecureShareResult {
+    state.pqc_state = PqcState::new();
+    if let Some(temp_file) = &state.temp_text_file {
+        let _ = fs::remove_file(temp_file);
+    }
+    state.temp_text_file = None;
+    if let Some(mut k) = state.final_key.take() {
+        k.zeroize();
+    }
+
     state.is_sender = true;
-    state.step = 1;
 
     if state.mode == "text" {
         let Some(text) = text_content else {
@@ -154,10 +226,11 @@ fn start_pqc_exchange(state: &mut SecureShareState) -> SecureShareResult {
     let key_path = std::path::Path::new(&state.key_output_dir).join("1.key");
     match fs::write(&key_path, pkg1) {
         Ok(_) => {
+            state.step = 1;
             let full_path = key_path.canonicalize().unwrap_or_else(|_| key_path.clone());
-            SecureShareResult::success(
+            SecureShareResult::key(
                 "Step 1: 1.key generated! Send this file to the receiver and wait for their response",
-                Some(format!("{} - Send this to Receiver", full_path.to_string_lossy())),
+                format!("{} - Send this to Receiver", full_path.to_string_lossy()),
             )
         }
         Err(e) => SecureShareResult::error(&format!("Error saving key: {e}")),
@@ -171,10 +244,15 @@ pub fn start_receiver(state: &mut SecureShareState, mode: &str) -> SecureShareRe
     state.mode = mode.to_string();
     state.step = 1;
 
-    SecureShareResult::success(
-        "Step 1: Wait for sender's files. Once you receive 1.key, 3.key and .pqrypt file, press 'Open Key' and select 1.key",
-        None,
-    )
+    if state.mode == "text" {
+        SecureShareResult::success(
+            "Step 1: Wait for sender's 1.key. Once received, press 'Open 1.key' to generate 2.key. Then wait for the encrypted .pqrypt file.",
+        )
+    } else {
+        SecureShareResult::success(
+            "Step 1: Wait for sender's 1.key. Once received, press 'Open 1.key' to generate 2.key.",
+        )
+    }
 }
 
 pub fn generate_key_with_file_path(state: &mut SecureShareState, key_file_path: &str, file_path: Option<&str>) -> SecureShareResult {
@@ -197,62 +275,138 @@ pub fn generate_key_with_file_path(state: &mut SecureShareState, key_file_path: 
             None => return SecureShareResult::error("No sender state available"),
         };
 
-        let (pkg3, mut final_key) = match rusty_api::hybrid::hybrid_sender_third(&receiver_bundle, sender_state) {
-            Ok(v) => v,
-            Err(e) => return SecureShareResult::error(&format!("Key exchange error: {e}")),
-        };
+        if state.mode == "text" {
+            let final_key = match rusty_api::hybrid::hybrid_sender_final(&receiver_bundle, sender_state) {
+                Ok(v) => v,
+                Err(e) => return SecureShareResult::error(&format!("Key exchange error: {e}")),
+            };
 
-        state.pqc_state.step = 2;
-        state.step = 3;
+            state.final_key = Some(final_key);
+            state.pqc_state.step = 2;
+            state.step = 2;
 
-        let key3_path = std::path::Path::new(&state.key_output_dir).join("3.key");
-        let final_key_path = std::path::Path::new(&state.key_output_dir).join("final.key");
+            let Some(temp_file) = state.temp_text_file.as_deref() else {
+                return SecureShareResult::error("No text file to encrypt");
+            };
+            let secret = state.final_key.as_ref().unwrap();
 
-        if let Err(e) = fs::write(&key3_path, &pkg3) {
-            final_key.zeroize();
-            return SecureShareResult::error(&format!("Error saving key: {e}"));
-        }
-
-        let write_final_res = fs::write(&final_key_path, final_key.as_slice());
-        final_key.zeroize();
-
-        if let Err(e) = write_final_res {
-            return SecureShareResult::error(&format!("Error saving final key: {e}"));
-        }
-
-        let _ = fs::remove_file(std::path::Path::new(&state.key_output_dir).join("1.key"));
-        let _ = fs::remove_file(std::path::Path::new(&state.key_output_dir).join("2.key"));
-
-        let encrypt_result = if state.mode == "text" {
-            if let Some(temp_file) = &state.temp_text_file {
-                encrypt_file_with_key_dir(temp_file, &state.key_output_dir)
+            let enc = encrypt_file_with_secret(temp_file, &state.key_output_dir, secret);
+            if enc.success {
+                SecureShareResult::out(
+                    "Final key generated and message encrypted. Send the encrypted .pqrypt file to receiver.",
+                    enc.out_path.unwrap_or_default(),
+                )
             } else {
-                SecureShareResult::error("No text file to encrypt")
+                enc
             }
-        } else if let Some(file_to_encrypt) = file_path {
-            encrypt_file_with_key_dir(file_to_encrypt, &state.key_output_dir)
         } else {
-            SecureShareResult::success("Ready to encrypt file", None)
-        };
+            let Some(file_to_encrypt) = file_path else {
+                return SecureShareResult::error("Please select a file to encrypt");
+            };
+            if file_to_encrypt.is_empty() {
+                return SecureShareResult::error("Please select a file to encrypt");
+            }
 
-        let full_path = key3_path.canonicalize().unwrap_or_else(|_| key3_path.clone());
+            let (pkg3, final_key) = match rusty_api::hybrid::hybrid_sender_third(&receiver_bundle, sender_state) {
+                Ok(v) => v,
+                Err(e) => return SecureShareResult::error(&format!("Key exchange error: {e}")),
+            };
 
-        if encrypt_result.success {
-            SecureShareResult::success(
-                &format!(
-                    "Step 4: Generated 3.key and encrypted file! Send 3.key and .pqrypt file to receiver. Encrypted file: {}",
-                    encrypt_result.file_path.clone().unwrap_or_default()
-                ),
-                Some(format!("{} - Send this to Receiver", full_path.to_string_lossy())),
-            )
-        } else {
-            SecureShareResult::success(
-                "Step 4: Generated 3.key. Send it to receiver, then you can encrypt.",
-                Some(format!("{} - Send this to Receiver", full_path.to_string_lossy())),
-            )
+            state.final_key = Some(final_key);
+            state.pqc_state.step = 2;
+            state.step = 3;
+
+            let secret = state.final_key.as_ref().unwrap();
+            let enc = encrypt_file_with_secret(file_to_encrypt, &state.key_output_dir, secret);
+            if enc.success {
+                let Some(out_path) = enc.out_path else {
+                    return SecureShareResult::error("Encryption succeeded but output file path is missing");
+                };
+
+                let tmp_base = std::path::Path::new(&state.key_output_dir).join("pqrypt_combined.pqrypt");
+                let tmp_path = generate_unique_filename(&tmp_base.to_string_lossy());
+
+                let mut input = match File::open(&out_path) {
+                    Ok(v) => v,
+                    Err(e) => return SecureShareResult::error(&format!("Error opening encrypted file: {e}")),
+                };
+                let mut out = match File::create(&tmp_path) {
+                    Ok(v) => v,
+                    Err(e) => return SecureShareResult::error(&format!("Error creating combined file: {e}")),
+                };
+
+                if let Err(e) = out.write_all(&pkg3) {
+                    let _ = fs::remove_file(&tmp_path);
+                    return SecureShareResult::error(&format!("Error writing embedded 3.key: {e}"));
+                }
+
+                let mut buf = [0u8; 131072];
+                loop {
+                    let n = match input.read(&mut buf) {
+                        Ok(0) => break,
+                        Ok(v) => v,
+                        Err(e) => {
+                            let _ = fs::remove_file(&tmp_path);
+                            return SecureShareResult::error(&format!("Error reading encrypted file: {e}"));
+                        }
+                    };
+                    if let Err(e) = out.write_all(&buf[..n]) {
+                        let _ = fs::remove_file(&tmp_path);
+                        return SecureShareResult::error(&format!("Error writing combined file: {e}"));
+                    }
+                }
+
+                let _ = out.flush();
+
+                if let Err(e) = fs::remove_file(&out_path) {
+                    let _ = fs::remove_file(&tmp_path);
+                    return SecureShareResult::error(&format!("Error replacing encrypted file: {e}"));
+                }
+                if let Err(e) = fs::rename(&tmp_path, &out_path) {
+                    let _ = fs::remove_file(&tmp_path);
+                    return SecureShareResult::error(&format!("Error replacing encrypted file: {e}"));
+                }
+
+                SecureShareResult::out(
+                    "3.key embedded into the encrypted file. Send the encrypted .pqrypt file to receiver.",
+                    out_path,
+                )
+            } else {
+                enc
+            }
         }
     } else {
-        if state.pqc_state.step == 0 {
+        if state.mode == "text" {
+            if state.pqc_state.step != 0 {
+                return SecureShareResult::error("Invalid step for receiver key generation");
+            }
+
+            let sender_pkg1 = match fs::read(key_file_path) {
+                Ok(b) => b,
+                Err(e) => return SecureShareResult::error(&format!("Error reading key: {e}")),
+            };
+
+            let (pkg2, final_key) = match rusty_api::hybrid::hybrid_receiver(&sender_pkg1) {
+                Ok(v) => v,
+                Err(e) => return SecureShareResult::error(&format!("Key exchange error: {e}")),
+            };
+
+            state.final_key = Some(final_key);
+            state.pqc_state.step = 2;
+            state.step = 2;
+
+            let key2_path = std::path::Path::new(&state.key_output_dir).join("2.key");
+            match fs::write(&key2_path, &pkg2) {
+                Ok(_) => {
+                    let full_path = key2_path.canonicalize().unwrap_or_else(|_| key2_path.clone());
+                    SecureShareResult::key(
+                        "Step 2: 2.key generated. Send it to sender and wait for the encrypted message file.",
+                        format!("{} - Send this to Sender", full_path.to_string_lossy()),
+                    )
+                }
+                Err(e) => SecureShareResult::error(&format!("Error saving key: {e}")),
+            }
+        } else if state.pqc_state.step == 0 {
             let sender_pkg1 = match fs::read(key_file_path) {
                 Ok(b) => b,
                 Err(e) => return SecureShareResult::error(&format!("Error reading key: {e}")),
@@ -271,9 +425,9 @@ pub fn generate_key_with_file_path(state: &mut SecureShareState, key_file_path: 
             match fs::write(&key2_path, &bundle2) {
                 Ok(_) => {
                     let full_path = key2_path.canonicalize().unwrap_or_else(|_| key2_path.clone());
-                    SecureShareResult::success(
-                        "Step 3: Generated 2.key. Send it to sender and wait for 3.key.",
-                        Some(format!("{} - Send this to Sender", full_path.to_string_lossy())),
+                    SecureShareResult::key(
+                        "Step 2: 2.key generated. Send it to sender and wait for the encrypted .pqrypt file.",
+                        format!("{} - Send this to Sender", full_path.to_string_lossy()),
                     )
                 }
                 Err(e) => SecureShareResult::error(&format!("Error saving key: {e}")),
@@ -289,7 +443,7 @@ pub fn generate_key_with_file_path(state: &mut SecureShareState, key_file_path: 
                 None => return SecureShareResult::error("No receiver state available"),
             };
 
-            let mut final_key = match rusty_api::hybrid::hybrid_receiver_final_dual(&pkg3, receiver_state) {
+            let final_key = match rusty_api::hybrid::hybrid_receiver_final_dual(&pkg3, receiver_state) {
                 Ok(v) => v,
                 Err(e) => return SecureShareResult::error(&format!("Finalize error: {e}")),
             };
@@ -297,106 +451,117 @@ pub fn generate_key_with_file_path(state: &mut SecureShareState, key_file_path: 
             state.pqc_state.step = 2;
             state.step = 3;
 
-            let final_key_path = std::path::Path::new(&state.key_output_dir).join("final.key");
-            let write_res = fs::write(&final_key_path, final_key.as_slice());
-            final_key.zeroize();
-
-            match write_res {
-                Ok(_) => {
-                    let _ = fs::remove_file(std::path::Path::new(&state.key_output_dir).join("1.key"));
-                    let _ = fs::remove_file(std::path::Path::new(&state.key_output_dir).join("2.key"));
-                    let _ = fs::remove_file(std::path::Path::new(&state.key_output_dir).join("3.key"));
-
-                    let decrypt_result = auto_decrypt_pqrypt_files(&state.key_output_dir, &state.mode);
-                    match decrypt_result {
-                        Ok(content) => {
-                            if state.mode == "text" && !content.is_empty() {
-                                SecureShareResult::success("Key exchange complete! Text message decrypted.", Some(content))
-                            } else {
-                                SecureShareResult::success("Key exchange complete! File decrypted.", Some(content))
-                            }
-                        }
-                        Err(e) => {
-                            let full_path = final_key_path
-                                .canonicalize()
-                                .unwrap_or_else(|_| final_key_path.clone());
-                            SecureShareResult::success(
-                                &format!("Key exchange complete! {e}"),
-                                Some(format!("{} - Key ready for decryption", full_path.to_string_lossy())),
-                            )
-                        }
-                    }
-                }
-                Err(e) => SecureShareResult::error(&format!("Error saving final key: {e}")),
-            }
+            state.final_key = Some(final_key);
+            SecureShareResult::success("Step 3: Final key ready. Now choose the encrypted file to decrypt.")
         } else {
             SecureShareResult::error("Invalid step for receiver key generation")
         }
     }
 }
 
-#[inline(always)]
-pub fn encrypt_file(file_path: &str) -> SecureShareResult {
-    encrypt_file_with_key_dir(file_path, ".")
-}
+pub fn decrypt_selected(state: &mut SecureShareState, file_path: &str) -> SecureShareResult {
+    if state.mode == "file" {
+        let p3_len = rusty_api::PACKAGE2_SIZE;
+        let file_len = match fs::metadata(file_path) {
+            Ok(m) => m.len(),
+            Err(e) => return SecureShareResult::error(&format!("Error reading file metadata: {e}")),
+        };
 
-pub fn encrypt_file_with_key_dir(file_path: &str, key_dir: &str) -> SecureShareResult {
-    if file_path.is_empty() {
-        return SecureShareResult::error("No file to encrypt");
-    }
+        let mut f = match File::open(file_path) {
+            Ok(v) => v,
+            Err(e) => return SecureShareResult::error(&format!("Error opening file: {e}")),
+        };
 
-    let final_key_path = std::path::Path::new(key_dir).join("final.key");
-    match fs::read(&final_key_path) {
-        Ok(mut key_data) => {
-            let mut secret = [0u8; rusty_api::ARGON2_OUTPUT_SIZE];
-            let copy_len = std::cmp::min(key_data.len(), secret.len());
-            secret[..copy_len].copy_from_slice(&key_data[..copy_len]);
-            key_data.zeroize();
-
-            let file_name = std::path::Path::new(file_path)
-                .file_name()
-                .unwrap_or(std::ffi::OsStr::new("file"))
-                .to_string_lossy();
-            let suggested_output_path = std::path::Path::new(key_dir).join(format!("{}.pqrypt", file_name));
-            let output_path = generate_unique_filename(&suggested_output_path.to_string_lossy());
-
-            let res = rusty_api::api::encrypt_file_pqrypt(file_path, &output_path, &secret);
-            secret.zeroize();
-
-            match res {
-                Ok(_) => {
-                    let full_output_path = std::path::Path::new(&output_path)
-                        .canonicalize()
-                        .unwrap_or_else(|_| std::path::PathBuf::from(&output_path));
-                    SecureShareResult::success(
-                        "File encrypted successfully! Send this .pqrypt file to receiver.",
-                        Some(full_output_path.to_string_lossy().to_string()),
-                    )
-                }
-                Err(e) => SecureShareResult::error(&format!("Encryption error: {e}")),
-            }
+        let mut magic0 = [0u8; 6];
+        if let Err(e) = f.read_exact(&mut magic0) {
+            return SecureShareResult::error(&format!("Error reading file: {e}"));
         }
-        Err(e) => SecureShareResult::error(&format!("Error reading final.key: {e}")),
-    }
-}
 
-#[inline(always)]
-pub fn decrypt_file(file_path: &str, mode: &str) -> SecureShareResult {
-    decrypt_file_with_key_dir(file_path, mode, ".")
-}
+        let is_plain_pqrypt = &magic0 == b"PQRYPT";
+        if !is_plain_pqrypt {
+            if (file_len as usize) < p3_len + 73 {
+                return SecureShareResult::error("Invalid encrypted file (too small for combined)");
+            }
 
-pub fn decrypt_file_with_key_dir(file_path: &str, mode: &str, key_dir: &str) -> SecureShareResult {
-    if file_path.is_empty() {
-        return SecureShareResult::error("No .pqrypt file selected");
-    }
+            if let Err(e) = f.seek(SeekFrom::Start(p3_len as u64)) {
+                return SecureShareResult::error(&format!("Error reading file: {e}"));
+            }
 
-    let final_key_path = std::path::Path::new(key_dir).join("final.key");
-    match fs::read(&final_key_path) {
-        Ok(mut key_data) => {
-            let mut secret = [0u8; rusty_api::ARGON2_OUTPUT_SIZE];
-            let copy_len = std::cmp::min(key_data.len(), secret.len());
-            secret[..copy_len].copy_from_slice(&key_data[..copy_len]);
-            key_data.zeroize();
+            let mut magic1 = [0u8; 6];
+            if let Err(e) = f.read_exact(&mut magic1) {
+                return SecureShareResult::error(&format!("Error reading file: {e}"));
+            }
+
+            let is_combined = &magic1 == b"PQRYPT";
+            if !is_combined {
+                return SecureShareResult::error("Invalid encrypted file format");
+            }
+
+            if state.final_key.is_none() {
+                if state.pqc_state.step != 1 {
+                    return SecureShareResult::error("No final key available. Complete the key exchange first.");
+                }
+
+                let receiver_state = match state.pqc_state.receiver_state.take() {
+                    Some(s) => s,
+                    None => {
+                        return SecureShareResult::error(
+                            "Receiver state missing. Open 1.key first to generate 2.key before decrypting.",
+                        )
+                    }
+                };
+
+                if let Err(e) = f.seek(SeekFrom::Start(0)) {
+                    return SecureShareResult::error(&format!("Error reading file: {e}"));
+                }
+
+                let mut p3 = vec![0u8; p3_len];
+                if let Err(e) = f.read_exact(&mut p3) {
+                    return SecureShareResult::error(&format!("Failed to read embedded 3.key: {e}"));
+                }
+
+                let final_key = match rusty_api::hybrid::hybrid_receiver_final_dual(&p3, receiver_state) {
+                    Ok(v) => v,
+                    Err(e) => return SecureShareResult::error(&format!("Finalize error: {e}")),
+                };
+
+                state.final_key = Some(final_key);
+                state.pqc_state.step = 2;
+                state.step = 3;
+            }
+
+            let Some(secret) = state.final_key.as_ref() else {
+                return SecureShareResult::error("No final key available. Complete the key exchange first.");
+            };
+
+            let base_tmp = std::path::Path::new(&state.key_output_dir).join("pqrypt_trimmed.pqrypt");
+            let tmp_path = generate_unique_filename(&base_tmp.to_string_lossy());
+
+            let mut input = match File::open(file_path) {
+                Ok(v) => v,
+                Err(e) => return SecureShareResult::error(&format!("Error opening file: {e}")),
+            };
+
+            if let Err(e) = input.seek(SeekFrom::Start(p3_len as u64)) {
+                return SecureShareResult::error(&format!("Error reading encrypted file: {e}"));
+            }
+
+            let mut out = match File::create(&tmp_path) {
+                Ok(v) => v,
+                Err(e) => return SecureShareResult::error(&format!("Error creating temp file: {e}")),
+            };
+
+            let mut buf = [0u8; 131072];
+            loop {
+                let n = match input.read(&mut buf) {
+                    Ok(0) => break,
+                    Ok(v) => v,
+                    Err(e) => return SecureShareResult::error(&format!("Error reading encrypted file: {e}")),
+                };
+                if let Err(e) = out.write_all(&buf[..n]) {
+                    return SecureShareResult::error(&format!("Error writing temp file: {e}"));
+                }
+            }
 
             let original_name = if file_path.ends_with(".pqrypt") {
                 std::path::Path::new(file_path)
@@ -415,39 +580,137 @@ pub fn decrypt_file_with_key_dir(file_path: &str, mode: &str, key_dir: &str) -> 
                 )
             };
 
-            let suggested_output_path = std::path::Path::new(key_dir).join(&original_name);
+            let suggested_output_path = std::path::Path::new(&state.key_output_dir).join(&original_name);
             let output_path = generate_unique_filename(&suggested_output_path.to_string_lossy());
 
-            let res = rusty_api::api::decrypt_file_pqrypt(file_path, &output_path, &secret);
-            secret.zeroize();
-
-            match res {
+            let res = match rusty_api::api::decrypt_file_pqrypt(&tmp_path, &output_path, secret) {
                 Ok(_) => {
                     let full_output_path = std::path::Path::new(&output_path)
                         .canonicalize()
                         .unwrap_or_else(|_| std::path::PathBuf::from(&output_path));
 
-                    if mode == "text" {
+                    if state.mode == "text" {
                         match fs::read_to_string(&output_path) {
                             Ok(text_content) => {
                                 let _ = fs::remove_file(&output_path);
-                                SecureShareResult::success("Text message decrypted successfully!", Some(text_content))
+                                SecureShareResult::text("Text message decrypted successfully!", text_content)
                             }
                             Err(e) => SecureShareResult::error(&format!("Error reading decrypted text: {e}")),
                         }
                     } else {
-                        SecureShareResult::success(
+                        SecureShareResult::out(
                             "File decrypted successfully!",
-                            Some(full_output_path.to_string_lossy().to_string()),
+                            full_output_path.to_string_lossy().to_string(),
                         )
                     }
                 }
                 Err(e) => SecureShareResult::error(&format!(
                     "Decryption failed: {e}. This may be due to file corruption, tampering, or wrong key selection."
                 )),
+            };
+            let _ = fs::remove_file(&tmp_path);
+
+            if res.success {
+                return res;
+            }
+
+            return res;
+        }
+    }
+
+    let Some(secret) = state.final_key.as_ref() else {
+        return SecureShareResult::error("No final key available. Complete the key exchange first.");
+    };
+    decrypt_file_with_secret(file_path, &state.mode, &state.key_output_dir, secret)
+}
+
+pub fn encrypt_selected(state: &SecureShareState, file_path: &str) -> SecureShareResult {
+    let Some(secret) = state.final_key.as_ref() else {
+        return SecureShareResult::error("No final key available. Complete the key exchange first.");
+    };
+    encrypt_file_with_secret(file_path, &state.key_output_dir, secret)
+}
+
+fn encrypt_file_with_secret(
+    file_path: &str,
+    key_dir: &str,
+    secret: &[u8; rusty_api::ARGON2_OUTPUT_SIZE],
+) -> SecureShareResult {
+    if file_path.is_empty() {
+        return SecureShareResult::error("No file to encrypt");
+    }
+
+    let file_name = std::path::Path::new(file_path)
+        .file_name()
+        .unwrap_or(std::ffi::OsStr::new("file"))
+        .to_string_lossy();
+    let suggested_output_path = std::path::Path::new(key_dir).join(format!("{}.pqrypt", file_name));
+    let output_path = generate_unique_filename(&suggested_output_path.to_string_lossy());
+
+    let res = rusty_api::api::encrypt_file_pqrypt(file_path, &output_path, secret);
+    match res {
+        Ok(_) => {
+            let full_output_path = std::path::Path::new(&output_path)
+                .canonicalize()
+                .unwrap_or_else(|_| std::path::PathBuf::from(&output_path));
+            SecureShareResult::out("File encrypted successfully!", full_output_path.to_string_lossy().to_string())
+        }
+        Err(e) => SecureShareResult::error(&format!("Encryption error: {e}")),
+    }
+}
+
+fn decrypt_file_with_secret(
+    file_path: &str,
+    mode: &str,
+    key_dir: &str,
+    secret: &[u8; rusty_api::ARGON2_OUTPUT_SIZE],
+) -> SecureShareResult {
+    if file_path.is_empty() {
+        return SecureShareResult::error("No .pqrypt file selected");
+    }
+
+    let original_name = if file_path.ends_with(".pqrypt") {
+        std::path::Path::new(file_path)
+            .file_name()
+            .unwrap_or(std::ffi::OsStr::new("file"))
+            .to_string_lossy()
+            .trim_end_matches(".pqrypt")
+            .to_string()
+    } else {
+        format!(
+            "{}.decrypted",
+            std::path::Path::new(file_path)
+                .file_name()
+                .unwrap_or(std::ffi::OsStr::new("file"))
+                .to_string_lossy()
+        )
+    };
+
+    let suggested_output_path = std::path::Path::new(key_dir).join(&original_name);
+    let output_path = generate_unique_filename(&suggested_output_path.to_string_lossy());
+
+    let res = rusty_api::api::decrypt_file_pqrypt(file_path, &output_path, secret);
+    match res {
+        Ok(_) => {
+            let full_output_path = std::path::Path::new(&output_path)
+                .canonicalize()
+                .unwrap_or_else(|_| std::path::PathBuf::from(&output_path));
+
+            if mode == "text" {
+                match fs::read_to_string(&output_path) {
+                    Ok(text_content) => {
+                        let _ = fs::remove_file(&output_path);
+                        SecureShareResult::text("Text message decrypted successfully!", text_content)
+                    }
+                    Err(e) => SecureShareResult::error(&format!("Error reading decrypted text: {e}")),
+                }
+            } else {
+                SecureShareResult::out("File decrypted successfully!", full_output_path.to_string_lossy().to_string())
             }
         }
-        Err(e) => SecureShareResult::error(&format!("Error reading final.key: {e}")),
+        Err(e) => SecureShareResult::error(&format!(
+            "Decryption failed: {e}. This may be due to file corruption, tampering, or wrong key selection."
+        )),
     }
 }
 
@@ -477,24 +740,4 @@ fn generate_unique_filename(base_path: &str) -> String {
     }
 
     base_path.to_string()
-}
-
-fn auto_decrypt_pqrypt_files(key_dir: &str, mode: &str) -> Result<String, String> {
-    let dir_path = std::path::Path::new(key_dir);
-    let entries = fs::read_dir(dir_path).map_err(|e| format!("Cannot read directory: {e}"))?;
-
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if path.extension().and_then(|s| s.to_str()) == Some("pqrypt") {
-            let file_path = path.to_string_lossy().to_string();
-            let result = decrypt_file_with_key_dir(&file_path, mode, key_dir);
-            if result.success {
-                if let Some(content) = result.file_path {
-                    return Ok(content);
-                }
-            }
-        }
-    }
-
-    Err("No .pqrypt files found to decrypt".to_string())
 }

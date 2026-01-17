@@ -573,9 +573,6 @@ class SecureShareBluetoothTextActivity : AppCompatActivity() {
         var wifiOk = false
         if (wifiResp == "WIFI_READY") {
             wifiOk = tryStartWifiDirectSender()
-            if (!wifiOk) {
-                sendBluetoothData("USE_BT".toByteArray(Charsets.UTF_8))
-            }
         }
         if (wifiOk) {
             showSuccess("Wi‑Fi Direct connected for text transfer")
@@ -968,17 +965,23 @@ class SecureShareBluetoothTextActivity : AppCompatActivity() {
     }
     
     private fun showError(message: String) {
-        binding.tvStatus.text = "Error: $message"
-        Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
+        runOnUiThread {
+            binding.tvStatus.text = "Error: $message"
+            Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
+        }
     }
     
     private fun showSuccess(message: String) {
-        binding.tvStatus.text = message
-        Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
+        runOnUiThread {
+            binding.tvStatus.text = message
+            Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
+        }
     }
     
     private fun openOutputFolder() {
-        Toast.makeText(this, "Text is displayed on screen; no files saved.", Toast.LENGTH_LONG).show()
+        runOnUiThread {
+            Toast.makeText(this, "Text is displayed on screen; no files saved.", Toast.LENGTH_LONG).show()
+        }
     }
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {

@@ -113,7 +113,7 @@ class SecureShareManualTextActivity : AppCompatActivity() {
                 isSender && currentStep == 1 -> generateStep1Key()
                 isSender && currentStep == 2 -> openKeyFile("2.key")
                 !isSender && currentStep == 1 -> openKeyFile("1.key")
-                !isSender && currentStep == 2 -> openKeyFile("3.key")
+                !isSender && currentStep == 2 -> openEncryptedTextFile()
                 !isSender && currentStep == 3 -> openEncryptedTextFile()
             }
         }
@@ -148,7 +148,7 @@ class SecureShareManualTextActivity : AppCompatActivity() {
             isSender && currentStep == 1 -> "Generate 1.key"
             isSender && currentStep == 2 -> "Open 2.key from Receiver"
             !isSender && currentStep == 1 -> "Open 1.key from Sender"
-            !isSender && currentStep == 2 -> "Open 3.key from Sender"
+            !isSender && currentStep == 2 -> "Open Encrypted File (.pqrypt)"
             !isSender && currentStep == 3 -> "Open Encrypted Text File"
             else -> "Process Complete"
         }
@@ -161,7 +161,7 @@ class SecureShareManualTextActivity : AppCompatActivity() {
             isSender && currentStep == 2 -> "Step 2: Send 1.key to receiver and wait for their 2.key. Once received, press 'Open 2.key from Receiver' button"
             isSender && currentStep > 2 -> "✅ Success! Your text has been encrypted. Send both 3.key and the encrypted text file to the receiver"
             !isSender && currentStep == 1 -> "Step 1: Wait for sender's 1.key file. Once received, press 'Open 1.key from Sender' button (2.key will auto-generate)"
-            !isSender && currentStep == 2 -> "Step 2: Send 2.key to sender and wait for their 3.key. Once received, press 'Open 3.key from Sender' button"
+            !isSender && currentStep == 2 -> "Step 2: Send 2.key to sender. Once you receive the encrypted file, press 'Open Encrypted File (.pqrypt)' to decrypt"
             !isSender && currentStep == 3 -> "Step 3: Wait for encrypted text file from sender. Once received, press 'Open Encrypted Text File' button to decrypt"
             else -> "✅ Process complete! Message successfully decrypted"
         }

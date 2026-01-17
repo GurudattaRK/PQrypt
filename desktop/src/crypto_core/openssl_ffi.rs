@@ -1480,45 +1480,66 @@ pub fn slhdsa_keygen() -> Result<(SlhDsaPublicKey, SlhDsaSecretKey), String> {
 //#MARK: SLH-DSA Signing
 /// Note: All inputs zeroized before return. Caller must zeroize returned signature.
 #[inline(always)]
-pub fn slhdsa_sign(message: &mut [u8], secret_material: &mut SlhDsaSecretKey) -> Result<SlhDsaSignature, String> {
+pub fn slhdsa_sign_into(
+    message: &mut [u8],
+    secret_material: &mut SlhDsaSecretKey,
+    signature_out: &mut [u8],
+) -> Result<(), String> {
+    if signature_out.len() != SLHDSA_SIGNATURE_SIZE {
+        secure_zero(signature_out);
+        secure_zero(message);
+        secure_zero(secret_material);
+        return Err("Invalid signature buffer size".to_string());
+    }
+
     unsafe {
         let pkey_val = u64::from_le_bytes(*secret_material);
         let pkey = pkey_val as usize as *mut openssl_sys::EVP_PKEY;
-        
+
         let md_ctx = openssl_sys::EVP_MD_CTX_new();
         if md_ctx.is_null() {
+            secure_zero(signature_out);
             secure_zero(message);
             secure_zero(secret_material);
             return Err("Failed to create context".to_string());
         }
-        
+
         if openssl_sys::EVP_DigestSignInit(md_ctx, ptr::null_mut(), ptr::null(), ptr::null_mut(), pkey) <= 0 {
             openssl_sys::EVP_MD_CTX_free(md_ctx);
+            secure_zero(signature_out);
             secure_zero(message);
             secure_zero(secret_material);
             return Err("Sign init failed".to_string());
         }
-        
-        // Sign directly into fixed-size stack buffer
-        let mut signature = [0u8; SLHDSA_SIGNATURE_SIZE];
+
         let mut sig_len = SLHDSA_SIGNATURE_SIZE;
-        
-        if openssl_sys::EVP_DigestSign(md_ctx, signature.as_mut_ptr(), &mut sig_len, message.as_ptr(), message.len()) <= 0 {
+        if openssl_sys::EVP_DigestSign(
+            md_ctx,
+            signature_out.as_mut_ptr(),
+            &mut sig_len,
+            message.as_ptr(),
+            message.len(),
+        ) <= 0 {
             openssl_sys::EVP_MD_CTX_free(md_ctx);
-            secure_zero(&mut signature);
+            secure_zero(signature_out);
             secure_zero(message);
             secure_zero(secret_material);
             return Err("Signing failed".to_string());
         }
-        
+
         openssl_sys::EVP_MD_CTX_free(md_ctx);
-        
-        // Zeroize inputs on success
+
         secure_zero(message);
         secure_zero(secret_material);
-        
-        Ok(signature)
+        Ok(())
     }
+}
+
+#[inline(always)]
+pub fn slhdsa_sign(message: &mut [u8], secret_material: &mut SlhDsaSecretKey) -> Result<SlhDsaSignature, String> {
+    let mut signature = [0u8; SLHDSA_SIGNATURE_SIZE];
+    slhdsa_sign_into(message, secret_material, &mut signature)?;
+    Ok(signature)
 }
 
 //#MARK: SLH-DSA Verification
@@ -1526,6 +1547,25 @@ pub fn slhdsa_sign(message: &mut [u8], secret_material: &mut SlhDsaSecretKey) ->
 #[inline(always)]
 pub fn slhdsa_verify(message: &mut [u8], signature: &mut SlhDsaSignature, public_key: &mut SlhDsaPublicKey) 
     -> Result<bool, String> {
+    slhdsa_verify_slices(message, signature, public_key)
+}
+
+#[inline(always)]
+pub fn slhdsa_verify_slices(message: &mut [u8], signature: &mut [u8], public_key: &mut [u8]) 
+    -> Result<bool, String> {
+    if signature.len() != SLHDSA_SIGNATURE_SIZE {
+        secure_zero(message);
+        secure_zero(signature);
+        secure_zero(public_key);
+        return Err("Invalid signature size".to_string());
+    }
+    if public_key.len() != SLHDSA_PUBLIC_SIZE {
+        secure_zero(message);
+        secure_zero(signature);
+        secure_zero(public_key);
+        return Err("Invalid public key size".to_string());
+    }
+
     unsafe {
         let alg_name = CString::new("SLH-DSA-SHAKE-256f").map_err(|e| {
             secure_zero(message);
