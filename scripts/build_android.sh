@@ -9,7 +9,10 @@ INSTALL_PREFIX="$OPENSSL_BASE/static_libs"
 
 CLEAN="${PQRYPT_CLEAN:-0}"
 
-OPENSSL_SRC="$OPENSSL_BASE/openssl-3.6.0"
+OPENSSL_TARBALL="$OPENSSL_BASE/openssl-3.6.0.tar.gz"
+OPENSSL_SRC_DEFAULT="$OPENSSL_BASE/openssl-3.6.0"
+OPENSSL_SRC_ALT="$OPENSSL_BASE/openssl"
+OPENSSL_SRC="$OPENSSL_SRC_DEFAULT"
 LIBOQS_SRC="$OPENSSL_BASE/liboqs"
 
 OPENSSL_DIR="$INSTALL_PREFIX/openssl-3.6-android"
@@ -18,6 +21,25 @@ OQS_DIR="$INSTALL_PREFIX/liboqs-0.15-android"
 ANDROID_API="${ANDROID_API:-34}"
 ANDROID_ABI="${ANDROID_ABI:-arm64-v8a}"
 ANDROID_TARGET="${ANDROID_TARGET:-aarch64-linux-android}"
+
+OS_NAME="$(uname -s)"
+if [ "$OS_NAME" = "Darwin" ]; then
+  NCPU="$(sysctl -n hw.ncpu)"
+elif [ "$OS_NAME" = "Linux" ]; then
+  if command -v nproc >/dev/null 2>&1; then
+    NCPU="$(nproc)"
+  else
+    NCPU="4"
+  fi
+else
+  NCPU="4"
+fi
+
+mkdir -p "$OPENSSL_BASE" "$INSTALL_PREFIX"
+
+if [ "$CLEAN" = "1" ]; then
+  rm -rf "$OPENSSL_DIR" "$OQS_DIR" || true
+fi
 
 if ! command -v cmake >/dev/null 2>&1; then
   echo "Error: cmake not found in PATH." >&2
@@ -58,9 +80,22 @@ if [ -z "$ADB" ]; then
   exit 1
 fi
 
+if [ ! -x "$OPENSSL_SRC_DEFAULT/Configure" ] && [ -x "$OPENSSL_SRC_ALT/Configure" ]; then
+  OPENSSL_SRC="$OPENSSL_SRC_ALT"
+fi
+
+if [ ! -x "$OPENSSL_SRC/Configure" ] && [ -f "$OPENSSL_TARBALL" ]; then
+  rm -rf "$OPENSSL_SRC_DEFAULT" || true
+  tar -xzf "$OPENSSL_TARBALL" -C "$OPENSSL_BASE"
+  OPENSSL_SRC="$OPENSSL_SRC_DEFAULT"
+fi
+
 if [ ! -x "$OPENSSL_SRC/Configure" ]; then
-  echo "Error: OpenSSL source not found at $OPENSSL_SRC" >&2
-  echo "Expected $OPENSSL_SRC/Configure to exist." >&2
+  echo "Error: OpenSSL source not found." >&2
+  echo "Expected Configure at one of:" >&2
+  echo "  - $OPENSSL_SRC_DEFAULT/Configure" >&2
+  echo "  - $OPENSSL_SRC_ALT/Configure" >&2
+  echo "Or provide $OPENSSL_TARBALL and let the script extract it." >&2
   exit 1
 fi
 
@@ -105,6 +140,8 @@ elif [ -d "$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/darwin-x86_64" ]; then
   NDK_PREBUILT="darwin-x86_64"
 elif [ -d "$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64" ]; then
   NDK_PREBUILT="linux-x86_64"
+elif [ -d "$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/windows-x86_64" ]; then
+  NDK_PREBUILT="windows-x86_64"
 else
   echo "Error: Unsupported/unknown NDK prebuilt host in $ANDROID_NDK_HOME/toolchains/llvm/prebuilt" >&2
   exit 1
@@ -112,8 +149,21 @@ fi
 
 TOOLCHAIN="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/$NDK_PREBUILT"
 export PATH="$TOOLCHAIN/bin:$PATH"
-export CC="${ANDROID_TARGET}${ANDROID_API}-clang"
-export CXX="${ANDROID_TARGET}${ANDROID_API}-clang++"
+
+CC_BASE="${ANDROID_TARGET}${ANDROID_API}-clang"
+CXX_BASE="${ANDROID_TARGET}${ANDROID_API}-clang++"
+
+if [ "$NDK_PREBUILT" = "windows-x86_64" ]; then
+  if [ -f "$TOOLCHAIN/bin/${CC_BASE}.cmd" ]; then
+    CC_BASE="${CC_BASE}.cmd"
+  fi
+  if [ -f "$TOOLCHAIN/bin/${CXX_BASE}.cmd" ]; then
+    CXX_BASE="${CXX_BASE}.cmd"
+  fi
+fi
+
+export CC="$CC_BASE"
+export CXX="$CXX_BASE"
 export AR=llvm-ar
 export RANLIB=llvm-ranlib
 export AS=llvm-as
@@ -136,7 +186,7 @@ if [ ! -f "$OPENSSL_DIR/lib/libcrypto.a" ] || [ ! -f "$OPENSSL_DIR/lib/libssl.a"
     --prefix="$OPENSSL_DIR" \
     --openssldir="$OPENSSL_DIR/ssl"
 
-  make -j"$(sysctl -n hw.ncpu)" && make install_sw
+  make -j"$NCPU" && make install_sw
 
   popd >/dev/null
 fi

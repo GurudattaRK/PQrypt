@@ -1043,7 +1043,7 @@ export component MainWindow inherits Window {
                 Text { text: "This app provides:"; }
                 Text { text: "• File Encryption: Encrypt/Decrypt files with password or key file."; wrap: word-wrap; }
                 Text { text: "• PQC Key Exchange: Generate and exchange post-quantum key files (1.key, 2.key, 3.key, final.key)."; wrap: word-wrap; }
-                Text { text: "• Secure Share: Combines PQC Key Exchange with File Encryption for secure text/file sharing."; wrap: word-wrap; }
+                Text { text: "• Secure Share: Share text/files using 1.key, 2.key, and one encrypted .pqrypt file."; wrap: word-wrap; }
                 Text { text: "• Password Generator: Deterministically generate passwords compatible with Android app."; wrap: word-wrap; }
             }
         }
@@ -1067,8 +1067,10 @@ export component MainWindow inherits Window {
                 spacing: 12px; padding: 20px;
                 HorizontalBox { ColorButton { text: "← Back"; bg: AppPalette.light_purple; clicked => { current-page = "pqc-key-exchange"; } } Rectangle { } }
                 Text { text: "PQC Key Exchange Help"; font-size: 20px; font-weight: 600; font-family: "Inter"; }
-                Text { text: "• Sender: Start exchange and create 1.key, send to Receiver."; wrap: word-wrap; }
+                Text { text: "• Sender: Start and create 1.key, send it to Receiver."; wrap: word-wrap; }
                 Text { text: "• Receiver: Open 1.key → generate 2.key → send 2.key to Sender."; wrap: word-wrap; }
+                Text { text: "• Sender: Open 2.key → generate 3.key + final.key → send 3.key to Receiver."; wrap: word-wrap; }
+                Text { text: "• Receiver: Open 3.key → app saves final.key."; wrap: word-wrap; }
             }
         }
 
@@ -1663,12 +1665,23 @@ export component MainWindow inherits Window {
                 }
                 
                 Text { text: "Secure Share Help"; font-size: 20px; font-weight: 600; font-family: "Inter"; }
-                Text { text: "Secure Share combines PQC Key Exchange with File Encryption for ultimate security."; wrap: word-wrap; }
-                Text { text: "• Text Sharing: Send encrypted messages securely"; wrap: word-wrap; }
-                Text { text: "• File Sharing: Send encrypted files securely"; wrap: word-wrap; }
-                Text { text: "• Sender: Choose content → Start key exchange → Wait for receiver's key → Generate final key → Encrypt & send"; wrap: word-wrap; }
-                Text { text: "• Receiver: Wait for sender's key → Generate response → Wait for final key → Receive encrypted content → Decrypt"; wrap: word-wrap; }
-                Text { text: "Both sender and receiver get the same final.key through PQC key exchange, which is then used for encryption."; wrap: word-wrap; }
+                Text { text: "Secure Share lets you send a file or a message safely."; wrap: word-wrap; }
+                Text { text: "It uses small key files plus ONE encrypted file."; wrap: word-wrap; }
+                Text { text: ""; }
+                Text { text: "Sender:"; font-weight: 600; }
+                Text { text: "• Choose Text or File, then choose Sender."; wrap: word-wrap; }
+                Text { text: "• Press Start to create 1.key, then send 1.key to the receiver."; wrap: word-wrap; }
+                Text { text: "• Open 2.key from the receiver."; wrap: word-wrap; }
+                Text { text: "• The app creates ONE encrypted .pqrypt file. Send that .pqrypt file to the receiver."; wrap: word-wrap; }
+                Text { text: ""; }
+                Text { text: "Receiver:"; font-weight: 600; }
+                Text { text: "• Choose Receiver, then open 1.key from the sender."; wrap: word-wrap; }
+                Text { text: "• Send 2.key back to the sender."; wrap: word-wrap; }
+                Text { text: "• When you receive the encrypted .pqrypt file, open it to decrypt."; wrap: word-wrap; }
+                Text { text: ""; }
+                Text { text: "Notes:"; font-weight: 600; }
+                Text { text: "• The encrypted .pqrypt file contains the final exchange piece embedded inside it, so the receiver usually does not need a separate 3.key file."; wrap: word-wrap; }
+                Text { text: "• After a successful text decrypt, the app may delete temporary key files and the encrypted file (best effort)."; wrap: word-wrap; }
             }
         }
     }

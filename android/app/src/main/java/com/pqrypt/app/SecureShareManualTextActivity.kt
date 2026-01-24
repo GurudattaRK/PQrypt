@@ -26,11 +26,15 @@ class SecureShareManualTextActivity : AppCompatActivity() {
     private var role = "sender"
     private var isSender = true
     private var currentStep = 1
+    private val P3_LEN = 66098
     
     // File and key management
     private var finalSharedSecret: ByteArray? = null
     private var lastOutputPath: String? = null
     private var etInputText: String = ""
+    private var package3Bytes: ByteArray? = null
+    private var tempTextFile: File? = null
+    private var senderKeyUri: Uri? = null
     
     // SAF saving state (copied from working PQC KeyExchangeProcessActivity)
     private var pickedFolderUri: Uri? = null
@@ -114,7 +118,6 @@ class SecureShareManualTextActivity : AppCompatActivity() {
                 isSender && currentStep == 2 -> openKeyFile("2.key")
                 !isSender && currentStep == 1 -> openKeyFile("1.key")
                 !isSender && currentStep == 2 -> openEncryptedTextFile()
-                !isSender && currentStep == 3 -> openEncryptedTextFile()
             }
         }
 
@@ -149,20 +152,18 @@ class SecureShareManualTextActivity : AppCompatActivity() {
             isSender && currentStep == 2 -> "Open 2.key from Receiver"
             !isSender && currentStep == 1 -> "Open 1.key from Sender"
             !isSender && currentStep == 2 -> "Open Encrypted File (.pqrypt)"
-            !isSender && currentStep == 3 -> "Open Encrypted Text File"
             else -> "Process Complete"
         }
         
-        binding.btnStep1.isEnabled = currentStep <= 3
+        binding.btnStep1.isEnabled = currentStep <= 2
         
         // Update status text
         binding.tvStatus.text = when {
-            isSender && currentStep == 1 -> "Step 1: Enter your text message above, then press 'Generate 1.key' button"
+            isSender && currentStep == 1 -> "Step 1: Enter your text message above, then press 'Generate 1.key'"
             isSender && currentStep == 2 -> "Step 2: Send 1.key to receiver and wait for their 2.key. Once received, press 'Open 2.key from Receiver' button"
-            isSender && currentStep > 2 -> "✅ Success! Your text has been encrypted. Send both 3.key and the encrypted text file to the receiver"
+            isSender && currentStep > 2 -> "✅ Success! Your text has been encrypted. Send the encrypted .pqrypt file to the receiver"
             !isSender && currentStep == 1 -> "Step 1: Wait for sender's 1.key file. Once received, press 'Open 1.key from Sender' button (2.key will auto-generate)"
             !isSender && currentStep == 2 -> "Step 2: Send 2.key to sender. Once you receive the encrypted file, press 'Open Encrypted File (.pqrypt)' to decrypt"
-            !isSender && currentStep == 3 -> "Step 3: Wait for encrypted text file from sender. Once received, press 'Open Encrypted Text File' button to decrypt"
             else -> "✅ Process complete! Message successfully decrypted"
         }
     }
@@ -174,7 +175,18 @@ class SecureShareManualTextActivity : AppCompatActivity() {
             try {
                 resetStates()
                 
-                // New protocol: hybridSenderInit() returns just package1
+                etInputText = binding.etTextInput.text.toString()
+                if (etInputText.trim().isEmpty()) {
+                    withContext(Dispatchers.Main) {
+                        showError("Please enter a text message")
+                    }
+                    return@launch
+                }
+
+                val tmp = File.createTempFile("secure_share_text_", ".txt", cacheDir)
+                tmp.writeText(etInputText)
+                tempTextFile = tmp
+
                 val package1 = RustyCrypto.hybridSenderInit()
                 
                 withContext(Dispatchers.Main) {
@@ -204,55 +216,60 @@ class SecureShareManualTextActivity : AppCompatActivity() {
                 }
 
                 when {
-                    // Receiver opening 1.key -> auto-generate 2.key AND get final key immediately
+                    // Receiver opening 1.key -> generate 2.key bundle ONLY (dual mutual exchange)
                     !isSender && currentStep == 1 -> {
                         resetStates()
-                        // New protocol: hybridReceiver returns Object[2]: [package2, finalKey]
-                        val recvResult = RustyCrypto.hybridReceiver(keyData)
-                        val package2 = recvResult[0] as ByteArray
-                        finalSharedSecret = recvResult[1] as ByteArray
-                        
+                        senderKeyUri = uri
+                        val package2 = RustyCrypto.hybridReceiverDual(keyData)
+
                         withContext(Dispatchers.Main) {
-                            if (package2.isNotEmpty() && finalSharedSecret != null) {
+                            if (package2 != null && package2.isNotEmpty()) {
                                 saveKeyFile(package2, "2.key")
-                                binding.tvStep1Result.text = "✅ 2.key and final key generated! Send 2.key to sender, then ready to decrypt"
+                                binding.tvStep1Result.text = "✅ 2.key generated! Send 2.key to sender, then wait for encrypted .pqrypt file"
                                 binding.tvStep1Result.visibility = View.VISIBLE
-                                currentStep = 2  // Receiver is now ready to decrypt
+                                currentStep = 2
                                 updateUI()
                             } else {
                                 showError("Failed to generate 2.key")
                             }
                         }
                     }
-                    
-                    // Sender opening 2.key -> get final key and encrypt text
+
+                    // Sender opening 2.key -> generate 3.key + final key, encrypt text, embed 3.key into encrypted payload
                     isSender && currentStep == 2 -> {
-                        // New protocol: hybridSenderFinal(package2) returns just finalKey
-                        finalSharedSecret = RustyCrypto.hybridSenderFinal(keyData)
-                        
                         withContext(Dispatchers.Main) {
-                            if (finalSharedSecret != null && finalSharedSecret!!.isNotEmpty()) {
-                                binding.tvStep1Result.text = "✅ Final key generated! Encrypting your text message..."
-                                binding.tvStep1Result.visibility = View.VISIBLE
-                                
-                                // Auto-encrypt text
-                                performTextEncryption()
-                            } else {
-                                showError("Failed to generate final key")
-                            }
+                            binding.tvStep1Result.text = "Processing 2.key..."
+                            binding.tvStep1Result.visibility = View.VISIBLE
                         }
-                    }
-                    
-                    // Receiver opening encrypted text -> auto-decrypt and display
-                    !isSender && currentStep == 2 -> {
-                        if (finalSharedSecret == null) {
+
+                        val result = RustyCrypto.hybridSenderThird(keyData)
+                        if (result == null || result.size != 2) {
                             withContext(Dispatchers.Main) {
-                                showError("No decryption key available")
+                                showError("Failed to process 2.key")
                             }
                             return@launch
                         }
-                        
-                        performTextDecryption(keyData)
+                        val p3 = result[0] as? ByteArray
+                        val fk = result[1] as? ByteArray
+                        if (p3 == null || fk == null || p3.isEmpty() || fk.isEmpty()) {
+                            withContext(Dispatchers.Main) {
+                                showError("Invalid data from native layer")
+                            }
+                            return@launch
+                        }
+                        package3Bytes = p3
+                        finalSharedSecret = fk
+
+                        withContext(Dispatchers.Main) {
+                            binding.tvStep1Result.text = "✅ Final key ready. Encrypting message..."
+                            binding.tvStep1Result.visibility = View.VISIBLE
+                        }
+                        performTextEncryption()
+                    }
+
+                    // Receiver opening encrypted text -> auto-decrypt and display
+                    !isSender && currentStep == 2 -> {
+                        performTextDecryption(uri, keyData)
                     }
                 }
             } catch (e: Exception) {
@@ -264,9 +281,20 @@ class SecureShareManualTextActivity : AppCompatActivity() {
     }
 
     private fun performTextEncryption() {
-        etInputText = binding.etTextInput.text.toString()
-        if (finalSharedSecret == null || etInputText.trim().isEmpty()) {
+        if (finalSharedSecret == null) {
             showError("Missing text or encryption key")
+            return
+        }
+
+        val inputFile = tempTextFile
+        if (inputFile == null || !inputFile.exists()) {
+            showError("Text file missing")
+            return
+        }
+
+        val p3 = package3Bytes
+        if (p3 == null || p3.isEmpty()) {
+            showError("Missing 3.key data")
             return
         }
 
@@ -287,10 +315,6 @@ class SecureShareManualTextActivity : AppCompatActivity() {
                     withContext(Dispatchers.Main) { showError("No destination folder selected") }
                     return@launch
                 }
-                // Create input file in cache
-                val inputFile = File.createTempFile("input_", ".txt", cacheDir)
-                inputFile.writeText(etInputText)
-                
                 // Create output file in cache
                 val outputFile = File.createTempFile("encrypted_", ".tmp", cacheDir)
                 
@@ -308,9 +332,13 @@ class SecureShareManualTextActivity : AppCompatActivity() {
 
                 if (success == RustyCrypto.CRYPTO_SUCCESS) {
                     val encryptedBytes = outputFile.readBytes()
-                    
+
+                    val combined = ByteArray(p3.size + encryptedBytes.size)
+                    System.arraycopy(p3, 0, combined, 0, p3.size)
+                    System.arraycopy(encryptedBytes, 0, combined, p3.size, encryptedBytes.size)
+
                     withContext(Dispatchers.Main) {
-                        saveKeyFile(encryptedBytes, "text.pqrypt")
+                        saveKeyFile(combined, "text.pqrypt")
                         binding.tvStep1Result.text = "Text encrypted and saved"
                         binding.tvStep1Result.visibility = View.VISIBLE
                         currentStep = 4
@@ -321,9 +349,10 @@ class SecureShareManualTextActivity : AppCompatActivity() {
                         showError("Text encryption failed")
                     }
                 }
-                
-                inputFile.delete()
+
                 outputFile.delete()
+                try { inputFile.delete() } catch (_: Exception) {}
+                tempTextFile = null
             } catch (e: Exception) {
                 withContext(Dispatchers.Main) {
                     showError("Encryption error: ${e.message}")
@@ -332,40 +361,54 @@ class SecureShareManualTextActivity : AppCompatActivity() {
         }
     }
 
-    private fun performTextDecryption(encryptedData: ByteArray) {
-        if (finalSharedSecret == null) {
-            showError("No decryption key available")
-            return
-        }
-
+    private fun performTextDecryption(encryptedUri: Uri, encryptedData: ByteArray) {
         lifecycleScope.launch(Dispatchers.IO) {
             try {
-                withContext(Dispatchers.Main) {
-                    if (pickedFolderUri == null) {
-                        binding.tvStatus.text = "Select destination folder before decryption"
-                        launchPickFolder()
+                var decryptBytes = encryptedData
+
+                val magic = byteArrayOf('P'.code.toByte(),'Q'.code.toByte(),'R'.code.toByte(),'Y'.code.toByte(),'P'.code.toByte(),'T'.code.toByte())
+                val isPlain = decryptBytes.size >= 6 && decryptBytes.copyOfRange(0, 6).contentEquals(magic)
+
+                if (!isPlain) {
+                    if (decryptBytes.size < P3_LEN + 73) {
+                        withContext(Dispatchers.Main) { showError("Invalid encrypted file (too small for combined)") }
+                        return@launch
+                    }
+
+                    val p3 = decryptBytes.copyOfRange(0, P3_LEN)
+                    val fk = RustyCrypto.hybridReceiverFinalDual(p3)
+                    if (fk == null || fk.isEmpty()) {
+                        withContext(Dispatchers.Main) { showError("Failed to finalize with embedded 3.key") }
+                        return@launch
+                    }
+                    finalSharedSecret = fk
+                    decryptBytes = decryptBytes.copyOfRange(P3_LEN, decryptBytes.size)
+                } else {
+                    if (finalSharedSecret == null) {
+                        withContext(Dispatchers.Main) { showError("No decryption key available. Please open 1.key first.") }
+                        return@launch
                     }
                 }
-                var attempts = 0
-                while (pickedFolderUri == null && attempts < 120) {
-                    kotlinx.coroutines.delay(1000)
-                    attempts++
-                }
-                if (pickedFolderUri == null) {
-                    withContext(Dispatchers.Main) { showError("No destination folder selected") }
-                    return@launch
-                }
-                // Write encrypted data to temp file
+
+                // Write encrypted payload to temp file
                 val inputFile = File.createTempFile("encrypted_", ".tmp", cacheDir)
-                inputFile.writeBytes(encryptedData)
+                inputFile.writeBytes(decryptBytes)
                 
                 val outputFile = File.createTempFile("decrypted_", ".txt", cacheDir)
                 
                 val inputFd = ParcelFileDescriptor.open(inputFile, ParcelFileDescriptor.MODE_READ_ONLY)
                 val outputFd = ParcelFileDescriptor.open(outputFile, ParcelFileDescriptor.MODE_CREATE or ParcelFileDescriptor.MODE_WRITE_ONLY)
                 
+                val secret = finalSharedSecret
+                if (secret == null || secret.isEmpty()) {
+                    withContext(Dispatchers.Main) { showError("No decryption key available") }
+                    inputFile.delete()
+                    outputFile.delete()
+                    return@launch
+                }
+
                 val success = try {
-                    RustyCrypto.doubleDecryptFd(finalSharedSecret!!, false, inputFd.fd, outputFd.fd)
+                    RustyCrypto.doubleDecryptFd(secret, false, inputFd.fd, outputFd.fd)
                 } catch (e: Exception) {
                     -1
                 } finally {
@@ -382,12 +425,12 @@ class SecureShareManualTextActivity : AppCompatActivity() {
                         binding.tvDecryptedText.text = decryptedText
                         binding.tvStep1Result.text = "Text decrypted successfully!"
                         binding.tvStep1Result.visibility = View.VISIBLE
-                        
-                        // Also save to file
-                        saveKeyFile(decryptedBytes, "text_decrypted.txt")
+
                         currentStep = 4
                         updateUI()
                     }
+
+                    deleteAfterDecrypt(encryptedUri)
                 } else {
                     withContext(Dispatchers.Main) {
                         val errorMessage = when (success) {
@@ -406,6 +449,34 @@ class SecureShareManualTextActivity : AppCompatActivity() {
                 withContext(Dispatchers.Main) {
                     showError("Decryption error: ${e.message}")
                 }
+            }
+        }
+    }
+
+    private fun deleteAfterDecrypt(encryptedUri: Uri) {
+        lifecycleScope.launch(Dispatchers.IO) {
+            try {
+                try {
+                    val doc = DocumentFile.fromSingleUri(this@SecureShareManualTextActivity, encryptedUri)
+                    doc?.delete()
+                } catch (_: Exception) {}
+
+                senderKeyUri?.let { keyUri ->
+                    try {
+                        val keyDoc = DocumentFile.fromSingleUri(this@SecureShareManualTextActivity, keyUri)
+                        keyDoc?.delete()
+                    } catch (_: Exception) {}
+                }
+
+                pickedFolderUri?.let { folderUri ->
+                    val treeDoc = DocumentFile.fromTreeUri(this@SecureShareManualTextActivity, folderUri)
+                    treeDoc?.findFile("1.key")?.delete()
+                    treeDoc?.findFile("2.key")?.delete()
+                    treeDoc?.findFile("3.key")?.delete()
+                    treeDoc?.findFile("text.pqrypt")?.delete()
+                }
+            } finally {
+                resetStates()
             }
         }
     }
@@ -429,6 +500,13 @@ class SecureShareManualTextActivity : AppCompatActivity() {
     private fun resetStates() {
         finalSharedSecret?.fill(0)
         finalSharedSecret = null
+        package3Bytes?.fill(0)
+        package3Bytes = null
+        senderKeyUri = null
+        tempTextFile?.let {
+            try { it.delete() } catch (_: Exception) {}
+        }
+        tempTextFile = null
     }
 
     private fun saveKeyFile(keyData: ByteArray, fileName: String) {

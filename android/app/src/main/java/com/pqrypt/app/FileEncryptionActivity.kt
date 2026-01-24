@@ -506,7 +506,7 @@ class FileEncryptionActivity : AppCompatActivity() { // UI for selecting files a
         CoroutineScope(Dispatchers.IO).launch {
             try {
                 val secret = pendingEncryptionSecret ?: return@launch
-                val suggestedName = pendingSuggestedName ?: "encrypted.pqrypt2"
+                val suggestedName = pendingSuggestedName ?: "encrypted.pqrypt"
                 
                 // Create output file in picked folder
                 val outputUri = createFileInFolder(pickedFolderUri!!, suggestedName)

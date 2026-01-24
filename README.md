@@ -47,66 +47,71 @@ macOS requires building from source due to security restrictions. See [Build fro
 - **Rust**: Install from [rustup.rs](https://rustup.rs/)
 - **Git**: For cloning the repository
 
-### 🍎 macOS (Required)
+For builds that use PQC (ML-KEM / HQC / SLH-DSA), PQrypt relies on a custom OpenSSL build and liboqs.
+This repo uses the `Openssl/` folder to build and cache static libraries.
+
+Required for the build scripts:
+- **cmake**
+- **ninja**
+- **perl** (OpenSSL build)
+
+### 🍎 macOS
 
 1. **Install Xcode Command Line Tools**:
    ```bash
    xcode-select --install
    ```
 
-2. **Clone and Build**:
+2. **Clone**:
    ```bash
    git clone https://github.com/GurudattaRK/PQrypt.git
-   cd PQrypt/desktop
-   cargo build --release
    ```
 
-3. **Run the App**:
+3. **Build Desktop (from scratch)**:
+
+This builds:
+- OpenSSL static libs into `Openssl/static_libs/openssl-3.6/`
+- liboqs static libs into `Openssl/static_libs/liboqs-0.15/`
+- the PQrypt desktop binary
+
+```bash
+PQRYPT_CLEAN=1 bash scripts/build_desktop.sh
+```
+
+4. **Run the App**:
    ```bash
-   ./target/release/pqrypt
-   ```
-
-### 🪟 Windows
-
-1. **Install Visual Studio Build Tools**:
-   - Download from [Visual Studio](https://visualstudio.microsoft.com/downloads/)
-   - Select "Desktop development with C++"
-
-2. **Clone and Build**:
-   ```bash
-   git clone https://github.com/GurudattaRK/PQrypt.git
-   cd PQrypt/desktop
-   cargo build --release
-   ```
-
-3. **Run the App**:
-   ```bash
-   .\target\release\pqrypt.exe
+   ./desktop/target/release/pqrypt
    ```
 
 ### 🐧 Linux
 
-1. **Install Dependencies**:
-   ```bash
-   # Ubuntu/Debian
-   sudo apt update
-   sudo apt install build-essential libxcb-dev libfontconfig1-dev
-   
-   # Fedora/RHEL
-   sudo dnf install gcc-c++ libxcb-devel fontconfig-devel
-   ```
+Linux builds from source use the same script as macOS, but require standard build tooling (`gcc/g++`, `make`, etc.).
 
-2. **Clone and Build**:
-   ```bash
-   git clone https://github.com/GurudattaRK/PQrypt.git
-   cd PQrypt/desktop
-   cargo build --release
-   ```
+```bash
+PQRYPT_CLEAN=1 bash scripts/build_desktop.sh
+```
 
-3. **Run the App**:
-   ```bash
-   ./target/release/pqrypt
-   ```
+### 🪟 Windows
+
+Windows build-from-source uses **MSYS2 (mingw64)** so OpenSSL + liboqs can be built as static **`.a`** archives.
+
+- Install MSYS2 and the mingw64 toolchain (bash/make/perl/cmake/ninja)
+- Ensure Rust is using the **GNU** toolchain (`x86_64-pc-windows-gnu`)
+
+Build Desktop (from scratch):
+
+```bat
+set PQRYPT_CLEAN=1
+scripts\build_desktop_windows.bat
+```
+
+Build Android (from scratch, builds OpenSSL+liboqs for Android and installs to all connected devices):
+
+```bat
+set ANDROID_NDK_HOME=C:\Path\To\Android\Sdk\ndk\<version>
+set PQRYPT_CLEAN=1
+scripts\build_android_windows.bat
+```
 
 ### 📱 Android
 
@@ -123,45 +128,36 @@ macOS requires building from source due to security restrictions. See [Build fro
    - Install NDK version 25 or higher
    - Install CMake 3.22.1
 
-4. **Build and Install**:
-   - Connect your Android device via USB (enable Developer Mode)
-   - Click the green "Run" button in Android Studio
-   - Or use command line:
-     ```bash
-     cd android
-     ./gradlew installDebug
-     ```
-   - Or if you want to build an APK in debug mode, use command line:
-     ```bash
-     cd android
-     ./gradlew assembleDebug
-     ```
-   - Or if you want to build an APK in release mode (for release mnode you'll have to sign it by setting up a signing key in android studio), use command line:
-     ```bash
-     cd android
-     ./gradlew assembleRelease
-     ```
+4. **Build and Install (from scratch)**:
+
+This builds:
+- OpenSSL static libs for Android into `Openssl/static_libs/openssl-3.6-android/`
+- liboqs static libs for Android into `Openssl/static_libs/liboqs-0.15-android/`
+- the Android debug APK, then installs it to all connected devices
+
+```bash
+PQRYPT_CLEAN=1 bash scripts/build_android.sh
+```
 
 ---
 
 ## 🔒 Cryptographic Architecture
 
-PQrypt implements a **9-algorithm hybrid cryptographic system** combining classical and post-quantum algorithms for maximum security:
+PQrypt implements a hybrid post-quantum + classical key exchange and then encrypts data using authenticated encryption.
 
 ### Layer 1: Post-Quantum Key Exchange
-1. **ML-KEM-1024** (FIPS 203) - NIST-standardized lattice-based key encapsulation
-2. **X448** - Elliptic curve Diffie-Hellman for classical security
-3. **HQC-256** - Code-based post-quantum algorithm
-4. **SecP521R1** - NIST elliptic curve for additional classical strength
+1. **ML-KEM-1024** (FIPS 203)
+2. **X448**
+3. **HQC-256**
+4. **SecP521R1**
 
-### Layer 2: Triple-Layer Symmetric Encryption
-5. **Threefish-1024** - 1024-bit block cipher (outermost layer)
-6. **Serpent-256** - AES finalist cipher (middle layer)
-7. **AES-256-GCM** - NIST standard with authentication (innermost layer)
+### Layer 2: Symmetric Encryption (Authenticated)
+5. **ChaCha20**
+6. **AES-256-GCM** (authenticates the ciphertext)
 
 ### Layer 3: Key Derivation & Authentication
-8. **Argon2id** - Memory-hard password hashing (winner of Password Hashing Competition)
-9. **ML-DSA** (FIPS 205) - Post-quantum digital signatures for authentication
+7. **Argon2id** (with PBKDF2-HMAC-SHA256 fallback)
+8. **SLH-DSA-SHAKE-256f** (signs key exchange packages)
 
 ### How They Work Together
 ```
@@ -170,19 +166,10 @@ PQrypt implements a **9-algorithm hybrid cryptographic system** combining classi
 │  (Post-quantum + Classical hybrid)                  │
 └──────────────────────┬──────────────────────────────┘
                        ↓
-              ┌────────────────┐
-              │  Argon2id KDF  │ ← Password derivation
-              └────────┬───────┘
-                       ↓
-        ┌──────────────────────────────┐
-        │   Triple Encryption Layers   │
-        │  Threefish → Serpent → AES   │
-        │  (Each layer adds security)  │
-        └──────────────┬───────────────┘
-                       ↓
-              ┌────────────────┐
-              │  ML-DSA Sign   │ ← Authentication
-              └────────────────┘
+              ┌──────────────────────────────┐
+              │   Double Encryption Layer    │
+              │  ChaCha20 → AES-256-GCM      │
+              └──────────────────────────────┘
 ```
 
 This architecture ensures:
@@ -209,6 +196,25 @@ This architecture ensures:
 
 - **Desktop Application** (`desktop/`): Cross-platform GUI built with Rust and Slint UI framework
 - **Android Application** (`android/`): Native Android app with Kotlin/Java frontend and optimized C++/Rust backend
+
+---
+
+## 🔐 Secure Share File Flow (Manual)
+
+Secure Share uses the PQC exchange and produces one encrypted `.pqrypt` file.
+
+- Sender:
+  - Create `1.key` and send it to the receiver
+  - Open `2.key` from the receiver
+  - The app produces one encrypted file (`.pqrypt`). For text mode this is typically `text.pqrypt`.
+
+- Receiver:
+  - Open `1.key` and send back `2.key`
+  - Open the received encrypted `.pqrypt` file to decrypt
+
+For Secure Share, the encrypted `.pqrypt` payload includes the final exchange piece embedded inside it, so the receiver usually does not need a separate `3.key` file.
+
+After successful decryption, the app may try to delete key files and the encrypted file (best effort).
 
 ---
 

@@ -39,9 +39,9 @@ class HelpActivity : AppCompatActivity() {
                 "• When to use: When you need to establish secure communication keys\n" +
                 "• Security: Uses quantum-resistant key exchange algorithms\n\n" +
                 "🔵 PASSWORD GENERATOR (Blue Button)\n" +
-                "• What it does: Generate strong, random passwords\n" +
+                "• What it does: Generate strong, deterministic passwords\n" +
                 "• When to use: When you need secure passwords for accounts or encryption\n" +
-                "• Security: Creates cryptographically secure random passwords\n\n" +
+                "• Security: Same inputs produce the same password (no storage)\n\n" +
                 "🟠 HELP BUTTON (Orange \"Help?\" Button)\n" +
                 "• What it does: Opens help documentation for the app\n" +
                 "• When to use: When you need guidance on using any feature\n\n" +
@@ -56,24 +56,24 @@ class HelpActivity : AppCompatActivity() {
                 "• Encrypt Button: Start encryption process\n" +
                 "• Progress Bar: Shows encryption progress\n\n" +
                 "🔓 DECRYPT TAB:\n" +
-                "• Choose File Button: Select encrypted file (.pqrypt2)\n" +
+                "• Choose File Button: Select encrypted file (.pqrypt)\n" +
                 "• Password Field: Enter decryption password\n" +
                 "• Decrypt Button: Start decryption process\n" +
                 "• Progress Bar: Shows decryption progress\n\n" +
                 "📋 SCREEN ELEMENTS:\n" +
                 "• File Display: Shows selected file name and size\n" +
                 "• Status Messages: Shows success/error messages\n" +
-                "• Output Location: Files are saved in Documents/PQrypt/\n\n" +
+                "• Output Location: Choose a folder when the app asks\n\n" +
                 "🔒 SECURITY TIPS:\n" +
                 "• Use strong passwords and remember them - lost passwords mean lost files\n" +
-                "• Encrypted files have .pqrypt2 extension\n" +
+                "• Encrypted files have .pqrypt extension\n" +
                 "• Original files are kept safe during encryption\n" +
                 "• Uses post-quantum cryptography for maximum security\n\n" +
                 "📍 QUICK START:\n" +
                 "1. Tap \"Choose File\" and select your file\n" +
                 "2. Enter a strong password\n" +
                 "3. Tap \"Encrypt\"\n" +
-                "4. Find encrypted file in Documents/PQrypt/"
+                "4. Send or store the encrypted .pqrypt file"
             )
             "password_vault" -> Pair(
                 "Password Generator Guide",
@@ -85,7 +85,7 @@ class HelpActivity : AppCompatActivity() {
                 "🎯 GENERATE BUTTON:\n" +
                 "• Creates a deterministic password\n" +
                 "• Same inputs always produce the same password\n" +
-                "• Cryptographically secure random generation\n\n" +
+                "• No storage: generated on-demand\n\n" +
                 "⚙️ SETTINGS BUTTON:\n" +
                 "• Choose password length (8-64 characters)\n" +
                 "• Select special character sets to include\n" +
@@ -93,7 +93,7 @@ class HelpActivity : AppCompatActivity() {
                 "📋 PASSWORD DISPLAY:\n" +
                 "• Shows generated password\n" +
                 "• Copy button to copy to clipboard\n" +
-                "• Strength indicator shows password security level\n\n" +
+                "\n" +
                 "🔒 SECURITY FEATURES:\n" +
                 "• Deterministic: Same inputs = same password\n" +
                 "• No storage: Passwords generated on-demand\n" +
@@ -156,27 +156,18 @@ class HelpActivity : AppCompatActivity() {
             )
             "pqc_process" -> Pair(
                 "PQC Manual Exchange Process",
-                "Step-by-step guide for manual key exchange:\n\n" +
-                "👤 SENDER PROCESS:\n" +
-                "1️⃣ Generate 1.key\n" +
-                "   • Creates initial key file to send to receiver\n" +
-                "   • Share this file with receiver via secure channel\n\n" +
-                "2️⃣ Process 2.key\n" +
-                "   • Open 2.key file received from receiver\n" +
-                "   • App automatically generates final.key\n" +
-                "   • Key exchange complete!\n\n" +
-                "👤 RECEIVER PROCESS:\n" +
-                "1️⃣ Process 1.key & Generate 2.key\n" +
-                "   • Open 1.key file received from sender\n" +
-                "   • App automatically generates 2.key and final.key\n" +
-                "   • Send 2.key back to sender\n\n" +
-                "📁 FILE LOCATIONS:\n" +
-                "• All key files saved in Documents/PQrypt/\n" +
-                "• Use \"Open Output Folder\" to find files\n\n" +
-                "🔒 SECURITY TIPS:\n" +
-                "• Use secure channels (encrypted email, secure messaging) to exchange .key files\n" +
-                "• Verify file integrity before processing\n" +
-                "• Clean up intermediate files after successful exchange"
+                "Manual key exchange uses 3 small files: 1.key, 2.key, 3.key.\n\n" +
+                "Sender:\n" +
+                "1) Generate 1.key and send it to the receiver\n" +
+                "2) Open 2.key from the receiver\n" +
+                "3) The app creates 3.key and final.key\n" +
+                "4) Send 3.key to the receiver\n\n" +
+                "Receiver:\n" +
+                "1) Open 1.key from the sender\n" +
+                "2) The app creates 2.key (send it back to the sender)\n" +
+                "3) Open 3.key from the sender\n" +
+                "4) The app creates final.key\n\n" +
+                "Tip: Always send these files using a method you trust (for example, a secure messenger, USB, or in person)."
             )
             "bluetooth" -> Pair(
                 "Bluetooth Key Exchange Guide",
@@ -192,9 +183,8 @@ class HelpActivity : AppCompatActivity() {
                 "• Select sender's device from the list\n" +
                 "• Connection will be established automatically\n\n" +
                 "🔄 AUTOMATIC PROCESS:\n" +
-                "• 1.key → 2.key → final.key\n" +
-                "• All steps happen automatically over Bluetooth\n" +
-                "• Progress shown on both devices\n" +
+                "• The exchange happens automatically\n" +
+                "• Progress is shown on both devices\n" +
                 "• No manual file sharing required\n\n" +
                 "📊 STATUS DISPLAY:\n" +
                 "• Connection status and progress\n" +
@@ -210,6 +200,17 @@ class HelpActivity : AppCompatActivity() {
                 "• Stay within Bluetooth range (typically 10 meters)\n" +
                 "• Verify device names before connecting\n" +
                 "• Grant all Bluetooth permissions when prompted"
+            )
+            "secure_share" -> Pair(
+                "Secure Share Guide",
+                "Secure Share helps you send a file or a message safely.\n\n" +
+                "1) Choose what you want to share: Text or File\n" +
+                "2) Choose how you want to transfer:\n" +
+                "   • Bluetooth (nearby and automatic)\n" +
+                "   • Wi‑Fi Direct (nearby and automatic, file only)\n" +
+                "   • Manual (works even when you are not nearby)\n\n" +
+                "Manual mode creates small files named 1.key and 2.key, plus one encrypted .pqrypt file.\n" +
+                "Follow the on-screen steps and use the Help button inside each Secure Share screen for the exact steps."
             )
             else -> Pair(
                 "Help",

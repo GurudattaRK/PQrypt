@@ -1111,6 +1111,7 @@ class SecureShareWifiDirectFileActivity : AppCompatActivity() {
         private const val PERMISSIONS_REQUEST_CODE = 310
     }
 
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
     private fun <T> kotlinx.coroutines.CompletableDeferred<T>.getCompletedOrNull(): T? {
         return try {
             getCompleted()
