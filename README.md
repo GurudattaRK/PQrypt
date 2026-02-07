@@ -36,12 +36,29 @@ PQrypt is a next-generation post quantum cryptographic application that can prot
 - **Git**: For cloning the repository
 
 For builds that use PQC (ML-KEM / HQC / SLH-DSA), PQrypt relies on a custom OpenSSL build and liboqs.
-This repo uses the `Openssl/` folder to build and cache static libraries.
+This repo uses the `Openssl/` folder to build and cache static libraries, but **does not** vendor those
+third-party sources. You must provide your own OpenSSL and liboqs checkouts in that folder.
 
 Required for the build scripts:
 - **cmake**
 - **ninja**
 - **perl** (OpenSSL build)
+
+The current scripts are wired for:
+
+- **OpenSSL**: 3.6.x (paths currently default to `openssl-3.6.0`)
+- **liboqs**: 0.15
+
+Expected `Openssl/` layout:
+
+- `Openssl/openssl-3.6.0/` – OpenSSL 3.6.x source tree (or `Openssl/openssl/` pointing to a compatible tree)
+- `Openssl/liboqs/` – liboqs 0.15 source checkout
+- `Openssl/static_libs/openssl-3.6/` – desktop OpenSSL static libs build/install prefix
+- `Openssl/static_libs/liboqs-0.15/` – desktop liboqs static lib build/install prefix
+- `Openssl/static_libs/openssl-3.6-android/` – Android OpenSSL static libs build/install prefix
+- `Openssl/static_libs/liboqs-0.15-android/` – Android liboqs static lib build/install prefix
+
+Only small metadata files (like these READMEs) are included in this repository under `Openssl/`.
 
 ### 🍎 macOS
 

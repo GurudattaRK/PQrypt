@@ -20,8 +20,25 @@ local.properties
 /android/build/
 /desktop/target/
 
-# Local prebuilt crypto toolchains
-/Openssl/
+# Local prebuilt crypto toolchains (sources and static libs are user-provided, but directory is tracked)
+# Keep directory skeleton + README, ignore everything else
+/Openssl/openssl-3.6.0/*
+!/Openssl/openssl-3.6.0/Placeholder*.md
+
+/Openssl/liboqs/*
+!/Openssl/liboqs/Placeholder*.md
+
+/Openssl/static_libs/liboqs-0.15/*
+!/Openssl/static_libs/liboqs-0.15/Placeholder*.md
+
+/Openssl/static_libs/liboqs-0.15-android/*
+!/Openssl/static_libs/liboqs-0.15-android/Placeholder*.md
+
+/Openssl/static_libs/openssl-3.6/*
+!/Openssl/static_libs/openssl-3.6/Placeholder*.md
+
+/Openssl/static_libs/openssl-3.6-android/*
+!/Openssl/static_libs/openssl-3.6-android/Placeholder*.md
 
 # Generated files
 *.apk
