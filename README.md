@@ -2,7 +2,7 @@
 
 **Quantum-Resistant Encryption for Everyone**
 
-PQrypt is a next-generation encryption application that protects your files and communications against both current and future quantum computer attacks. Available for **Desktop** (Windows, macOS, Linux) and **Android**.
+PQrypt is a next-generation post quantum cryptographic application that can protect your files and communications against both current and future quantum attacks. Available for Windows, macOS, Linux, and Android.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20macOS%20%7C%20Linux%20%7C%20Android-blue)](https://github.com/GurudattaRK/PQrypt)
@@ -10,25 +10,13 @@ PQrypt is a next-generation encryption application that protects your files and 
 
 ---
 
-## 📥 Installation (Pre-built Binaries)
+## 📥 Installation for Windows & Android (Pre-built Binaries)
 
 ### 🪟 Windows
 1. Go to [Releases](https://github.com/GurudattaRK/PQrypt/releases)
 2. Download `pqrypt-windows.exe`
 3. Double-click to run (Windows Defender may show a warning - click "More info" → "Run anyway")
 
-### 🐧 Linux
-1. Go to [Releases](https://github.com/GurudattaRK/PQrypt/releases)
-2. Download `pqrypt-linux`
-3. Open Terminal in the download folder
-4. Run:
-   ```bash
-   chmod +x pqrypt-linux
-   ./pqrypt-linux
-   ```
-
-### 🍎 macOS (Build Required)
-macOS requires building from source due to security restrictions. See [Build from Source](#-build-from-source) below.
 
 ### 📱 Android
 1. Go to [Releases](https://github.com/GurudattaRK/PQrypt/releases)
@@ -41,7 +29,7 @@ macOS requires building from source due to security restrictions. See [Build fro
 
 ---
 
-## 🛠️ Build from Source
+## 🛠️ Build Desktop app from Source (Linux, macOS, windows)
 
 ### Prerequisites
 - **Rust**: Install from [rustup.rs](https://rustup.rs/)
@@ -113,7 +101,7 @@ set PQRYPT_CLEAN=1
 scripts\build_android_windows.bat
 ```
 
-### 📱 Android
+### 📱 Build the Android app from source
 
 1. **Install Android Studio** from [developer.android.com](https://developer.android.com/studio)
 
@@ -128,108 +116,66 @@ scripts\build_android_windows.bat
    - Install NDK version 25 or higher
    - Install CMake 3.22.1
 
-4. **Build and Install (from scratch)**:
+4. **Run `build_android.sh` to Build and Install (this works on Linux & macOS but its unstable on Windows)**:
+```bash
+PQRYPT_CLEAN=1 bash scripts/build_android.sh
+```
 
 This builds:
 - OpenSSL static libs for Android into `Openssl/static_libs/openssl-3.6-android/`
 - liboqs static libs for Android into `Openssl/static_libs/liboqs-0.15-android/`
 - the Android debug APK, then installs it to all connected devices
 
-```bash
-PQRYPT_CLEAN=1 bash scripts/build_android.sh
-```
+
 
 ---
 
 ## 🔒 Cryptographic Architecture
 
-PQrypt implements a hybrid post-quantum + classical key exchange and then encrypts data using authenticated encryption.
+PQrypt is built on using 8 different cryptographic algorithms:
 
-### Layer 1: Post-Quantum Key Exchange
-1. **ML-KEM-1024** (FIPS 203)
-2. **X448**
-3. **HQC-256**
-4. **SecP521R1**
+### Asymmetric cryptography: Key Exchange & Key Encapsulation
+1. **ML-KEM-1024** (a.k.a Crystals-Kyber)
+2. **X448** (a.k.a Curve448)
+3. **HQC-256** (a.k.a Hamming-Quasi-Cyclic KEM)
+4. **SecP521R1** (a.k.a P-521)
 
-### Layer 2: Symmetric Encryption (Authenticated)
+### Symmetric cryptography: File Encryption (Authenticated)
 5. **ChaCha20**
-6. **AES-256-GCM** (authenticates the ciphertext)
+6. **AES-256-GCM** (Also responsible for Ciphertext authentication)
 
-### Layer 3: Key Derivation & Authentication
-7. **Argon2id** (with PBKDF2-HMAC-SHA256 fallback)
-8. **SLH-DSA-SHAKE-256f** (signs key exchange packages)
+### Cryptographic Digital Signatures: Secure Signing & Authencation of data
+7. **SLH-DSA-SHAKE-256f** (a.k.a SPHINCS+)
 
-### How They Work Together
-```
-┌─────────────────────────────────────────────────────┐
-│  Key Exchange: ML-KEM ⊕ X448 + HQC ⊕ P521           │
-│  (Post-quantum + Classical hybrid)                  │
-└──────────────────────┬──────────────────────────────┘
-                       ↓
-              ┌──────────────────────────────┐
-              │   Double Encryption Layer    │
-              │  ChaCha20 → AES-256-GCM      │
-              └──────────────────────────────┘
-```
-
-This architecture ensures:
-- **Quantum Resistance**: Even if quantum computers break one algorithm, others remain secure
-- **Defense in Depth**: Multiple encryption layers protect against cryptanalysis
-- **Forward Secrecy**: Each session uses unique ephemeral keys
-- **Authentication**: Digital signatures prevent tampering
+### Cryptographic Hashing: Memory-hard secure hashing
+8. **Argon2id** (with PBKDF2-HMAC-SHA256 fallback)
 
 ---
 
 ## ✨ Features
 
-- 🛡️ **Post-Quantum Secure**: Protected against quantum computer attacks
-- 📁 **File Encryption**: Encrypt any file with password or key file
+- 🛡️ **Post-Quantum Secure**: Resistant against quantum attacks.
+- 📁 **File Encryption**: Encrypt any file with password or key file.
 - 💬 **Secure Messaging**: Send encrypted text/files between devices
-- 🔑 **Password Vault**: Store passwords with quantum-resistant encryption
+- 🔑 **Password Generator**: Generate strong passwords securely & deterministically
 - 📱 **Cross-Platform**: Works on Android, Windows, macOS, and Linux
-- 🔄 **Key Exchange**: Secure key sharing via Bluetooth or manual transfer
-- 🎯 **Zero Knowledge**: Your keys never leave your device
 
 ---
 
-## 🏗️ Architecture
+## 🏗️ Project Architecture
 
-- **Desktop Application** (`desktop/`): Cross-platform GUI built with Rust and Slint UI framework
-- **Android Application** (`android/`): Native Android app with Kotlin/Java frontend and optimized C++/Rust backend
-
----
-
-## 🔐 Secure Share File Flow (Manual)
-
-Secure Share uses the PQC exchange and produces one encrypted `.pqrypt` file.
-
-- Sender:
-  - Create `1.key` and send it to the receiver
-  - Open `2.key` from the receiver
-  - The app produces one encrypted file (`.pqrypt`). For text mode this is typically `text.pqrypt`.
-
-- Receiver:
-  - Open `1.key` and send back `2.key`
-  - Open the received encrypted `.pqrypt` file to decrypt
-
-For Secure Share, the encrypted `.pqrypt` payload includes the final exchange piece embedded inside it, so the receiver usually does not need a separate `3.key` file.
-
-After successful decryption, the app may try to delete key files and the encrypted file (best effort).
+- **Desktop Application** (`desktop/`): Cross-platform GUI app for Linux, MacOS, and Windows built with Rust & Slint UI framework
+- **Android Application** (`android/`): Native Android app with Kotlin fronted bridged  to Rust backend using java/C++ FFI.
 
 ---
+
 
 
 ## ⚠️ Disclaimer
 
-This software is provided "as is" without warranty. While we use industry-standard algorithms and best practices, no encryption or security is 100% unbreakable. Always:
+This software is provided "as is" without warranty or guarantee. While industry-standard algorithms are used & best practices are followed, no encryption or security is 100% unbreakable & no software is 100% safe. Hence, if any kind of damage or loss is caused by using this Project, software or any component of this project to anyone/any group of people then this project, App(s), or any of its contributors and creators shall not be held responsible.
+Always:
 - Keep backups of important data
 - Use strong, unique passwords
 - Keep your software updated
-- Don't share your encryption keys
-
-## 🔗 Links
-
-- [Rust Documentation](https://doc.rust-lang.org/)
-- [Slint UI Framework](https://slint.dev/)
-- [Android NDK Guide](https://developer.android.com/ndk/guides)
-- [Post-Quantum Cryptography](https://csrc.nist.gov/projects/post-quantum-cryptography)
+- Don't share your encryption keys & sensitive data
