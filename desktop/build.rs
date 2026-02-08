@@ -38,9 +38,10 @@ fn main() {
     }
 
     if env::var("OPENSSL_STATIC").is_ok() {
-        let openssl_dir = env::var("OPENSSL_DIR")
+        // Find OpenSSL dir and determine lib subdirectory (lib or lib64)
+        let (openssl_dir, lib_subdir) = env::var("OPENSSL_DIR")
             .ok()
-            .map(PathBuf::from)
+            .map(|d| (PathBuf::from(d), "lib".to_string()))
             .or_else(|| {
                 let mut candidates = Vec::new();
                 if let Some(r) = &repo_root {
@@ -49,18 +50,24 @@ fn main() {
                 if let Some(b) = &custom_openssl_base {
                     candidates.push(b.join("static_libs/openssl-3.6"));
                 }
-                candidates
-                    .into_iter()
-                    .find(|p| p.join("lib/libssl.a").exists() && p.join("lib/libcrypto.a").exists())
+                for p in candidates {
+                    // Check lib64 first (Windows MSYS2), then lib (Unix)
+                    if p.join("lib64/libssl.a").exists() && p.join("lib64/libcrypto.a").exists() {
+                        return Some((p, "lib64".to_string()));
+                    }
+                    if p.join("lib/libssl.a").exists() && p.join("lib/libcrypto.a").exists() {
+                        return Some((p, "lib".to_string()));
+                    }
+                }
+                None
+            })
+            .unwrap_or_else(|| {
+                panic!("OPENSSL_STATIC is set but OpenSSL static libs not found. Build static deps into <repo>/Openssl/static_libs or set PQRYPT_CUSTOM_OPENSSL_DIR to your Openssl folder or set OPENSSL_DIR to a prefix containing lib/libssl.a and lib/libcrypto.a");
             });
 
-        if let Some(openssl_dir) = openssl_dir {
-            let openssl_lib_dir = openssl_dir.join("lib");
-            println!("cargo:rustc-link-search=native={}", openssl_lib_dir.display());
-            println!("cargo:rustc-link-lib=static=ssl");
-            println!("cargo:rustc-link-lib=static=crypto");
-        } else {
-            panic!("OPENSSL_STATIC is set but OpenSSL static libs not found. Build static deps into <repo>/Openssl/static_libs or set PQRYPT_CUSTOM_OPENSSL_DIR to your Openssl folder or set OPENSSL_DIR to a prefix containing lib/libssl.a and lib/libcrypto.a");
-        }
+        let openssl_lib_dir = openssl_dir.join(&lib_subdir);
+        println!("cargo:rustc-link-search=native={}", openssl_lib_dir.display());
+        println!("cargo:rustc-link-lib=static=ssl");
+        println!("cargo:rustc-link-lib=static=crypto");
     }
 }

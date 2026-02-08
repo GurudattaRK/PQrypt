@@ -4,7 +4,7 @@ use super::openssl_ffi::{
     aes_encrypt_with_aad, aes_decrypt_with_aad,
     x448mlkem1024_keygen, x448mlkem1024_encaps, x448mlkem1024_decaps,
     hqc_p521_keygen, hqc_p521_encaps, hqc_p521_decaps,
-    slhdsa_keygen, slhdsa_sign_into, slhdsa_verify_slices,
+    slhdsa_keygen, slhdsa_sign, slhdsa_verify,
     argon2id_derive, secure_zero,
 };
 // Import all types and constants from constants_errors
@@ -57,7 +57,7 @@ pub fn double_decrypt(
     double_ciphertext: &mut [u8],
     aad: &[u8]
 ) -> Result<Vec<u8>, String> {
-    // Step 1: AES-GCM decryption (includes tag verification)
+    // Step 1: AES-GCM decryption (includes tag verification with AAD)
     let mut chacha_ciphertext = aes_decrypt_with_aad(aes_key, aes_nonce, double_ciphertext, aes_tag, aad)?;
     
     // Step 2: ChaCha20 decryption
@@ -97,19 +97,23 @@ pub fn sender_init() -> Result<(Package1, MlKem1024X448SecretKey, HqcP521SecretK
     // Generate SLH-DSA keys
     let (slhdsa_public, slhdsa_secret) = slhdsa_keygen()?;
     
-    // Create package1: signature || combined_key1 || slhdsa_public
-    let mut package1 = [0u8; PACKAGE1_SIZE];
-    
-    package1[SLHDSA_SIGNATURE_SIZE..SLHDSA_SIGNATURE_SIZE + COMBINED_KEY1_SIZE]
-        .copy_from_slice(&combined_key1);
-    package1[SLHDSA_SIGNATURE_SIZE + COMBINED_KEY1_SIZE..SLHDSA_SIGNATURE_SIZE + COMBINED_KEY1_SIZE + SLHDSA_PUBLIC_SIZE]
-        .copy_from_slice(&slhdsa_public);
-
-    // Sign combined_key1 (sign a copy since slhdsa_sign_into zeroizes its input)
+    // Sign combined_key1 (sign a copy since slhdsa_sign zeroizes its input)
     let mut combined_key1_copy = combined_key1;
     let mut slhdsa_secret_copy = slhdsa_secret;
-    slhdsa_sign_into(&mut combined_key1_copy, &mut slhdsa_secret_copy, &mut package1[..SLHDSA_SIGNATURE_SIZE])?;
+    let signature = slhdsa_sign(&mut combined_key1_copy, &mut slhdsa_secret_copy)?;
     secure_zero(&mut combined_key1_copy); // Explicitly zero the copy
+    
+    // Create package1: signature || combined_key1 || slhdsa_public
+    let mut package1 = [0u8; PACKAGE1_SIZE];
+    offset = 0;
+    
+    package1[offset..offset + SLHDSA_SIGNATURE_SIZE].copy_from_slice(&signature);
+    offset += SLHDSA_SIGNATURE_SIZE;
+    
+    package1[offset..offset + COMBINED_KEY1_SIZE].copy_from_slice(&combined_key1);
+    offset += COMBINED_KEY1_SIZE;
+    
+    package1[offset..offset + SLHDSA_PUBLIC_SIZE].copy_from_slice(&slhdsa_public);
     
     Ok((package1, x448_secret, hqc_secret, slhdsa_secret))
 }
@@ -120,16 +124,22 @@ pub fn sender_init() -> Result<(Package1, MlKem1024X448SecretKey, HqcP521SecretK
 #[inline(always)]
 pub fn receiver(package1: &mut Package1) -> Result<(DerivedHash, Package2), String> {
     // Extract from package1
-    let mut offset = SLHDSA_SIGNATURE_SIZE;
-
+    let mut offset = 0;
+    
+    let mut signature = [0u8; SLHDSA_SIGNATURE_SIZE];
+    signature.copy_from_slice(&package1[offset..offset + SLHDSA_SIGNATURE_SIZE]);
+    offset += SLHDSA_SIGNATURE_SIZE;
+    
     let mut combined_key1 = [0u8; COMBINED_KEY1_SIZE];
     combined_key1.copy_from_slice(&package1[offset..offset + COMBINED_KEY1_SIZE]);
-
+    offset += COMBINED_KEY1_SIZE;
+    
+    let mut slhdsa_public = [0u8; SLHDSA_PUBLIC_SIZE];
+    slhdsa_public.copy_from_slice(&package1[offset..offset + SLHDSA_PUBLIC_SIZE]);
+    
     // Verify signature (verify a copy since slhdsa_verify zeroizes its input)
     let mut combined_key1_copy = combined_key1;
-    let (sig_part, rest) = package1.split_at_mut(SLHDSA_SIGNATURE_SIZE);
-    let (_, pub_part) = rest.split_at_mut(COMBINED_KEY1_SIZE);
-    slhdsa_verify_slices(&mut combined_key1_copy, sig_part, &mut pub_part[..SLHDSA_PUBLIC_SIZE])?;
+    slhdsa_verify(&mut combined_key1_copy, &mut signature, &mut slhdsa_public)?;
     secure_zero(&mut combined_key1_copy); // Explicitly zero the copy
     
     // Extract public keys from combined_key1
@@ -173,23 +183,23 @@ pub fn receiver(package1: &mut Package1) -> Result<(DerivedHash, Package2), Stri
     // Generate receiver's SLH-DSA keys
     let (recv_slhdsa_public, recv_slhdsa_secret) = slhdsa_keygen()?;
     
-    // Create package2: signature || combined_key2 || slhdsa_public
-    let mut package2 = [0u8; PACKAGE2_SIZE];
-
-    package2[SLHDSA_SIGNATURE_SIZE..SLHDSA_SIGNATURE_SIZE + COMBINED_KEY2_SIZE]
-        .copy_from_slice(&combined_key2);
-    package2[SLHDSA_SIGNATURE_SIZE + COMBINED_KEY2_SIZE..SLHDSA_SIGNATURE_SIZE + COMBINED_KEY2_SIZE + SLHDSA_PUBLIC_SIZE]
-        .copy_from_slice(&recv_slhdsa_public);
-
-    // Sign combined_key2 (sign a copy since slhdsa_sign_into zeroizes its input)
+    // Sign combined_key2 (sign a copy since slhdsa_sign zeroizes its input)
     let mut combined_key2_copy = combined_key2;
     let mut recv_slhdsa_secret_copy = recv_slhdsa_secret;
-    slhdsa_sign_into(
-        &mut combined_key2_copy,
-        &mut recv_slhdsa_secret_copy,
-        &mut package2[..SLHDSA_SIGNATURE_SIZE],
-    )?;
+    let recv_signature = slhdsa_sign(&mut combined_key2_copy, &mut recv_slhdsa_secret_copy)?;
     secure_zero(&mut combined_key2_copy); // Explicitly zero the copy
+    
+    // Create package2: signature || combined_key2 || slhdsa_public
+    let mut package2 = [0u8; PACKAGE2_SIZE];
+    offset = 0;
+    
+    package2[offset..offset + SLHDSA_SIGNATURE_SIZE].copy_from_slice(&recv_signature);
+    offset += SLHDSA_SIGNATURE_SIZE;
+    
+    package2[offset..offset + COMBINED_KEY2_SIZE].copy_from_slice(&combined_key2);
+    offset += COMBINED_KEY2_SIZE;
+    
+    package2[offset..offset + SLHDSA_PUBLIC_SIZE].copy_from_slice(&recv_slhdsa_public);
     
     // Combine shared secrets and hash
     let mut combined_shared = [0u8; COMBINED_SHARED_SIZE];
@@ -218,16 +228,22 @@ pub fn sender_final(
     hqc_secret: &mut HqcP521SecretKey
 ) -> Result<DerivedHash, String> {
     // Extract from package2
-    let mut offset = SLHDSA_SIGNATURE_SIZE;
-
+    let mut offset = 0;
+    
+    let mut signature = [0u8; SLHDSA_SIGNATURE_SIZE];
+    signature.copy_from_slice(&package2[offset..offset + SLHDSA_SIGNATURE_SIZE]);
+    offset += SLHDSA_SIGNATURE_SIZE;
+    
     let mut combined_key2 = [0u8; COMBINED_KEY2_SIZE];
     combined_key2.copy_from_slice(&package2[offset..offset + COMBINED_KEY2_SIZE]);
-
+    offset += COMBINED_KEY2_SIZE;
+    
+    let mut slhdsa_public = [0u8; SLHDSA_PUBLIC_SIZE];
+    slhdsa_public.copy_from_slice(&package2[offset..offset + SLHDSA_PUBLIC_SIZE]);
+    
     // Verify signature (verify a copy since slhdsa_verify zeroizes its input)
     let mut combined_key2_copy = combined_key2;
-    let (sig_part, rest) = package2.split_at_mut(SLHDSA_SIGNATURE_SIZE);
-    let (_, pub_part) = rest.split_at_mut(COMBINED_KEY2_SIZE);
-    slhdsa_verify_slices(&mut combined_key2_copy, sig_part, &mut pub_part[..SLHDSA_PUBLIC_SIZE])?;
+    slhdsa_verify(&mut combined_key2_copy, &mut signature, &mut slhdsa_public)?;
     secure_zero(&mut combined_key2_copy); // Explicitly zero the copy
     
     // Extract ciphertexts from combined_key2

@@ -21,7 +21,7 @@ pub type AesTag = [u8; AES_TAG_SIZE];
 
 // ChaCha20
 pub const CHACHA_KEY_SIZE: usize = 32;
-pub const CHACHA_NONCE_SIZE: usize = 12;  // Standard ChaCha20 uses 12-byte nonce
+pub const CHACHA_NONCE_SIZE: usize = 12;  // TEST: Try 12 bytes to see what OpenSSL actually expects
 pub type ChaChaKey = [u8; CHACHA_KEY_SIZE];
 pub type ChaChaNonce = [u8; CHACHA_NONCE_SIZE];
 
@@ -119,6 +119,72 @@ unsafe extern "C" {
     ) -> c_int;
 }
 
+//#MARK: AES Decrypt with AAD
+/// Note: All inputs zeroized before return. Caller must zeroize returned plaintext.
+#[inline(always)]
+pub fn aes_decrypt_with_aad(
+    key: &mut [u8; AES_KEY_SIZE],
+    nonce: &mut [u8; AES_NONCE_SIZE],
+    ciphertext: &mut [u8],
+    tag: &mut [u8; AES_TAG_SIZE],
+    aad: &[u8]
+) -> Result<Vec<u8>, String> {
+    let cipher = Cipher::aes_256_gcm();
+    let mut decrypter = Crypter::new(cipher, Mode::Decrypt, key, Some(nonce))
+        .map_err(|e| {
+            secure_zero(key);
+            secure_zero(nonce);
+            secure_zero(ciphertext);
+            secure_zero(tag);
+            e.to_string()
+        })?;
+
+    // Supply AAD before processing ciphertext
+    decrypter.aad_update(aad).map_err(|e| {
+        secure_zero(key);
+        secure_zero(nonce);
+        secure_zero(ciphertext);
+        secure_zero(tag);
+        e.to_string()
+    })?;
+
+    // Set expected tag for verification (must be set before finalize)
+    decrypter.set_tag(tag).map_err(|e| {
+        secure_zero(key);
+        secure_zero(nonce);
+        secure_zero(ciphertext);
+        secure_zero(tag);
+        e.to_string()
+    })?;
+
+    let mut plaintext = vec![0u8; ciphertext.len() + cipher.block_size()];
+    let mut count = decrypter.update(ciphertext, &mut plaintext).map_err(|e| {
+        secure_zero(&mut plaintext);
+        secure_zero(key);
+        secure_zero(nonce);
+        secure_zero(ciphertext);
+        secure_zero(tag);
+        e.to_string()
+    })?;
+    count += decrypter.finalize(&mut plaintext[count..]).map_err(|e| {
+        secure_zero(&mut plaintext);
+        secure_zero(key);
+        secure_zero(nonce);
+        secure_zero(ciphertext);
+        secure_zero(tag);
+        e.to_string()
+    })?;
+    plaintext.truncate(count);
+
+    // Zeroize inputs on success
+    secure_zero(key);
+    secure_zero(nonce);
+    secure_zero(ciphertext);
+    secure_zero(tag);
+
+    Ok(plaintext)
+}
+
 // liboqs 0.15 types and functions for HQC-256
 #[repr(C)]
 pub struct OQS_KEM {
@@ -213,172 +279,6 @@ pub fn aes_encrypt_with_aad(
 }
 
  
-
-//#MARK: AES Decrypt with AAD
-/// Note: All inputs zeroized before return. Caller must zeroize returned plaintext.
-#[inline(always)]
-pub fn aes_decrypt_with_aad(
-    key: &mut [u8; AES_KEY_SIZE],
-    nonce: &mut [u8; AES_NONCE_SIZE],
-    ciphertext: &mut [u8],
-    tag: &mut [u8; AES_TAG_SIZE],
-    aad: &[u8]
-) -> Result<Vec<u8>, String> {
-    let cipher = Cipher::aes_256_gcm();
-    let mut decrypter = Crypter::new(cipher, Mode::Decrypt, key, Some(nonce))
-        .map_err(|e| {
-            secure_zero(key);
-            secure_zero(nonce);
-            secure_zero(ciphertext);
-            secure_zero(tag);
-            e.to_string()
-        })?;
-
-    // Supply AAD before processing ciphertext
-    decrypter.aad_update(aad).map_err(|e| {
-        secure_zero(key);
-        secure_zero(nonce);
-        secure_zero(ciphertext);
-        secure_zero(tag);
-        e.to_string()
-    })?;
-
-    // Set expected tag for verification (must be set before finalize)
-    decrypter.set_tag(tag).map_err(|e| {
-        secure_zero(key);
-        secure_zero(nonce);
-        secure_zero(ciphertext);
-        secure_zero(tag);
-        e.to_string()
-    })?;
-
-    let mut plaintext = vec![0u8; ciphertext.len() + cipher.block_size()];
-    let mut count = decrypter.update(ciphertext, &mut plaintext).map_err(|e| {
-        secure_zero(&mut plaintext);
-        secure_zero(key);
-        secure_zero(nonce);
-        secure_zero(ciphertext);
-        secure_zero(tag);
-        e.to_string()
-    })?;
-    count += decrypter.finalize(&mut plaintext[count..]).map_err(|e| {
-        secure_zero(&mut plaintext);
-        secure_zero(key);
-        secure_zero(nonce);
-        secure_zero(ciphertext);
-        secure_zero(tag);
-        e.to_string()
-    })?;
-    plaintext.truncate(count);
-
-    // Zeroize inputs on success
-    secure_zero(key);
-    secure_zero(nonce);
-    secure_zero(ciphertext);
-    secure_zero(tag);
-
-    Ok(plaintext)
-}
-
-//#MARK: AES Encrypt
-/// Note: All inputs are zeroized before return. Caller must zeroize returned (ciphertext, tag).
-#[inline(always)]
-pub fn aes_encrypt(key: &mut [u8; AES_KEY_SIZE], nonce: &mut [u8; AES_NONCE_SIZE], plaintext: &mut [u8]) 
-    -> Result<(Vec<u8>, [u8; AES_TAG_SIZE]), String> {
-    let cipher = Cipher::aes_256_gcm();
-    let mut encrypter = Crypter::new(cipher, Mode::Encrypt, key, Some(nonce))
-        .map_err(|e| {
-            secure_zero(key);
-            secure_zero(nonce);
-            secure_zero(plaintext);
-            e.to_string()
-        })?;
-    
-    let mut ciphertext = vec![0u8; plaintext.len() + cipher.block_size()];
-    let mut count = encrypter.update(plaintext, &mut ciphertext).map_err(|e| {
-        secure_zero(&mut ciphertext);
-        secure_zero(key);
-        secure_zero(nonce);
-        secure_zero(plaintext);
-        e.to_string()
-    })?;
-    count += encrypter.finalize(&mut ciphertext[count..]).map_err(|e| {
-        secure_zero(&mut ciphertext);
-        secure_zero(key);
-        secure_zero(nonce);
-        secure_zero(plaintext);
-        e.to_string()
-    })?;
-    ciphertext.truncate(count);
-    
-    let mut tag = [0u8; AES_TAG_SIZE];
-    encrypter.get_tag(&mut tag).map_err(|e| {
-        secure_zero(&mut ciphertext);
-        secure_zero(&mut tag);
-        secure_zero(key);
-        secure_zero(nonce);
-        secure_zero(plaintext);
-        e.to_string()
-    })?;
-    
-    // Zeroize inputs on success
-    secure_zero(key);
-    secure_zero(nonce);
-    secure_zero(plaintext);
-    
-    Ok((ciphertext, tag))
-}
-
-//#MARK: AES Decrypt
-/// Note: All inputs zeroized before return. Caller must zeroize returned plaintext.
-#[inline(always)]
-pub fn aes_decrypt(key: &mut [u8; AES_KEY_SIZE], nonce: &mut [u8; AES_NONCE_SIZE], 
-               ciphertext: &mut [u8], tag: &mut [u8; AES_TAG_SIZE]) 
-    -> Result<Vec<u8>, String> {
-    let cipher = Cipher::aes_256_gcm();
-    let mut decrypter = Crypter::new(cipher, Mode::Decrypt, key, Some(nonce))
-        .map_err(|e| {
-            secure_zero(key);
-            secure_zero(nonce);
-            secure_zero(ciphertext);
-            secure_zero(tag);
-            e.to_string()
-        })?;
-    decrypter.set_tag(tag).map_err(|e| {
-        secure_zero(key);
-        secure_zero(nonce);
-        secure_zero(ciphertext);
-        secure_zero(tag);
-        e.to_string()
-    })?;
-    
-    let mut plaintext = vec![0u8; ciphertext.len() + cipher.block_size()];
-    let mut count = decrypter.update(ciphertext, &mut plaintext).map_err(|e| {
-        secure_zero(&mut plaintext);
-        secure_zero(key);
-        secure_zero(nonce);
-        secure_zero(ciphertext);
-        secure_zero(tag);
-        e.to_string()
-    })?;
-    count += decrypter.finalize(&mut plaintext[count..]).map_err(|e| {
-        secure_zero(&mut plaintext);
-        secure_zero(key);
-        secure_zero(nonce);
-        secure_zero(ciphertext);
-        secure_zero(tag);
-        e.to_string()
-    })?;
-    plaintext.truncate(count);
-    
-    // Zeroize inputs on success
-    secure_zero(key);
-    secure_zero(nonce);
-    secure_zero(ciphertext);
-    secure_zero(tag);
-    
-    Ok(plaintext)
-}
 
 //#MARK: ChaCha20 Encrypt
 /// Note: All inputs zeroized before return. Caller must zeroize returned ciphertext.
@@ -675,7 +575,7 @@ pub fn x448mlkem1024_encaps(public_key: &mut MlKem1024X448PublicKey)
         
         let mut recipient_pkey: *mut openssl_sys::EVP_PKEY = ptr::null_mut();
         if EVP_PKEY_fromdata(ctx, &mut recipient_pkey, 
-            openssl_sys::EVP_PKEY_PUBLIC_KEY, params.as_mut_ptr()) <= 0 {
+            openssl_sys::EVP_PKEY_PUBLIC_KEY as i32, params.as_mut_ptr()) <= 0 {
             openssl_sys::EVP_PKEY_CTX_free(ctx);
             secure_zero(mlkem_public);
             secure_zero(x448_public);
@@ -905,7 +805,7 @@ pub fn x448mlkem1024_decaps(secret_key: &mut MlKem1024X448SecretKey, ciphertext:
         
         let mut pkey: *mut openssl_sys::EVP_PKEY = ptr::null_mut();
         if EVP_PKEY_fromdata(ctx, &mut pkey, 
-            openssl_sys::EVP_PKEY_KEYPAIR, params.as_mut_ptr()) <= 0 {
+            openssl_sys::EVP_PKEY_KEYPAIR as i32, params.as_mut_ptr()) <= 0 {
             openssl_sys::EVP_PKEY_CTX_free(ctx);
             secure_zero(mlkem_secret);
             secure_zero(x448_secret);
@@ -1327,7 +1227,7 @@ pub fn hqc_p521_decaps(secret_key: &mut HqcP521SecretKey, ciphertext: &mut HqcP5
         our_public.mul_generator(
             &p521_group,
             &bn,
-            &openssl::bn::BigNumContext::new().unwrap()
+            &mut openssl::bn::BigNumContext::new().unwrap()
         ).map_err(|e| {
             secure_zero(&mut hqc_ss);
             secure_zero(hqc_secret);
@@ -1480,66 +1380,45 @@ pub fn slhdsa_keygen() -> Result<(SlhDsaPublicKey, SlhDsaSecretKey), String> {
 //#MARK: SLH-DSA Signing
 /// Note: All inputs zeroized before return. Caller must zeroize returned signature.
 #[inline(always)]
-pub fn slhdsa_sign_into(
-    message: &mut [u8],
-    secret_material: &mut SlhDsaSecretKey,
-    signature_out: &mut [u8],
-) -> Result<(), String> {
-    if signature_out.len() != SLHDSA_SIGNATURE_SIZE {
-        secure_zero(signature_out);
-        secure_zero(message);
-        secure_zero(secret_material);
-        return Err("Invalid signature buffer size".to_string());
-    }
-
+pub fn slhdsa_sign(message: &mut [u8], secret_material: &mut SlhDsaSecretKey) -> Result<SlhDsaSignature, String> {
     unsafe {
         let pkey_val = u64::from_le_bytes(*secret_material);
         let pkey = pkey_val as usize as *mut openssl_sys::EVP_PKEY;
-
+        
         let md_ctx = openssl_sys::EVP_MD_CTX_new();
         if md_ctx.is_null() {
-            secure_zero(signature_out);
             secure_zero(message);
             secure_zero(secret_material);
             return Err("Failed to create context".to_string());
         }
-
+        
         if openssl_sys::EVP_DigestSignInit(md_ctx, ptr::null_mut(), ptr::null(), ptr::null_mut(), pkey) <= 0 {
             openssl_sys::EVP_MD_CTX_free(md_ctx);
-            secure_zero(signature_out);
             secure_zero(message);
             secure_zero(secret_material);
             return Err("Sign init failed".to_string());
         }
-
+        
+        // Sign directly into fixed-size stack buffer
+        let mut signature = [0u8; SLHDSA_SIGNATURE_SIZE];
         let mut sig_len = SLHDSA_SIGNATURE_SIZE;
-        if openssl_sys::EVP_DigestSign(
-            md_ctx,
-            signature_out.as_mut_ptr(),
-            &mut sig_len,
-            message.as_ptr(),
-            message.len(),
-        ) <= 0 {
+        
+        if openssl_sys::EVP_DigestSign(md_ctx, signature.as_mut_ptr(), &mut sig_len, message.as_ptr(), message.len()) <= 0 {
             openssl_sys::EVP_MD_CTX_free(md_ctx);
-            secure_zero(signature_out);
+            secure_zero(&mut signature);
             secure_zero(message);
             secure_zero(secret_material);
             return Err("Signing failed".to_string());
         }
-
+        
         openssl_sys::EVP_MD_CTX_free(md_ctx);
-
+        
+        // Zeroize inputs on success
         secure_zero(message);
         secure_zero(secret_material);
-        Ok(())
+        
+        Ok(signature)
     }
-}
-
-#[inline(always)]
-pub fn slhdsa_sign(message: &mut [u8], secret_material: &mut SlhDsaSecretKey) -> Result<SlhDsaSignature, String> {
-    let mut signature = [0u8; SLHDSA_SIGNATURE_SIZE];
-    slhdsa_sign_into(message, secret_material, &mut signature)?;
-    Ok(signature)
 }
 
 //#MARK: SLH-DSA Verification
@@ -1547,25 +1426,6 @@ pub fn slhdsa_sign(message: &mut [u8], secret_material: &mut SlhDsaSecretKey) ->
 #[inline(always)]
 pub fn slhdsa_verify(message: &mut [u8], signature: &mut SlhDsaSignature, public_key: &mut SlhDsaPublicKey) 
     -> Result<bool, String> {
-    slhdsa_verify_slices(message, signature, public_key)
-}
-
-#[inline(always)]
-pub fn slhdsa_verify_slices(message: &mut [u8], signature: &mut [u8], public_key: &mut [u8]) 
-    -> Result<bool, String> {
-    if signature.len() != SLHDSA_SIGNATURE_SIZE {
-        secure_zero(message);
-        secure_zero(signature);
-        secure_zero(public_key);
-        return Err("Invalid signature size".to_string());
-    }
-    if public_key.len() != SLHDSA_PUBLIC_SIZE {
-        secure_zero(message);
-        secure_zero(signature);
-        secure_zero(public_key);
-        return Err("Invalid public key size".to_string());
-    }
-
     unsafe {
         let alg_name = CString::new("SLH-DSA-SHAKE-256f").map_err(|e| {
             secure_zero(message);
