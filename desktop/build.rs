@@ -7,6 +7,8 @@ fn main() {
     println!("cargo:rerun-if-changed=build.rs");
     println!("cargo:rerun-if-env-changed=OQS_DIR");
     println!("cargo:rerun-if-env-changed=OPENSSL_DIR");
+    println!("cargo:rerun-if-env-changed=OPENSSL_LIB_DIR");
+    println!("cargo:rerun-if-env-changed=OPENSSL_INCLUDE_DIR");
     println!("cargo:rerun-if-env-changed=OPENSSL_STATIC");
 
     let custom_openssl_base = env::var("PQRYPT_CUSTOM_OPENSSL_DIR").ok().map(PathBuf::from);
@@ -38,34 +40,40 @@ fn main() {
     }
 
     if env::var("OPENSSL_STATIC").is_ok() {
-        // Find OpenSSL dir and determine lib subdirectory (lib or lib64)
-        let (openssl_dir, lib_subdir) = env::var("OPENSSL_DIR")
+        let openssl_lib_dir = env::var("OPENSSL_LIB_DIR")
             .ok()
-            .map(|d| (PathBuf::from(d), "lib".to_string()))
+            .map(PathBuf::from)
             .or_else(|| {
-                let mut candidates = Vec::new();
-                if let Some(r) = &repo_root {
-                    candidates.push(r.join("Openssl/static_libs/openssl-3.6"));
-                }
-                if let Some(b) = &custom_openssl_base {
-                    candidates.push(b.join("static_libs/openssl-3.6"));
-                }
-                for p in candidates {
-                    // Check lib64 first (Windows MSYS2), then lib (Unix)
-                    if p.join("lib64/libssl.a").exists() && p.join("lib64/libcrypto.a").exists() {
-                        return Some((p, "lib64".to_string()));
+                let openssl_dir = env::var("OPENSSL_DIR")
+                    .ok()
+                    .map(PathBuf::from)
+                    .or_else(|| {
+                        let mut candidates = Vec::new();
+                        if let Some(r) = &repo_root {
+                            candidates.push(r.join("Openssl/static_libs/openssl-3.6"));
+                        }
+                        if let Some(b) = &custom_openssl_base {
+                            candidates.push(b.join("static_libs/openssl-3.6"));
+                        }
+                        candidates.into_iter().find(|p| {
+                            (p.join("lib64/libssl.a").exists() && p.join("lib64/libcrypto.a").exists())
+                                || (p.join("lib/libssl.a").exists() && p.join("lib/libcrypto.a").exists())
+                        })
+                    });
+
+                openssl_dir.map(|p| {
+                    let lib64 = p.join("lib64");
+                    if lib64.join("libssl.a").exists() && lib64.join("libcrypto.a").exists() {
+                        return lib64;
                     }
-                    if p.join("lib/libssl.a").exists() && p.join("lib/libcrypto.a").exists() {
-                        return Some((p, "lib".to_string()));
-                    }
-                }
-                None
+                    p.join("lib")
+                })
             })
             .unwrap_or_else(|| {
-                panic!("OPENSSL_STATIC is set but OpenSSL static libs not found. Build static deps into <repo>/Openssl/static_libs or set PQRYPT_CUSTOM_OPENSSL_DIR to your Openssl folder or set OPENSSL_DIR to a prefix containing lib/libssl.a and lib/libcrypto.a");
+                panic!("OPENSSL_STATIC is set but OpenSSL static libs not found. Build static deps into <repo>/Openssl/static_libs or set PQRYPT_CUSTOM_OPENSSL_DIR to your Openssl folder or set OPENSSL_DIR/OPENSSL_LIB_DIR to point at your OpenSSL static libs.");
             });
 
-        let openssl_lib_dir = openssl_dir.join(&lib_subdir);
+        println!("cargo:warning=Using OpenSSL lib dir: {}", openssl_lib_dir.display());
         println!("cargo:rustc-link-search=native={}", openssl_lib_dir.display());
         println!("cargo:rustc-link-lib=static=ssl");
         println!("cargo:rustc-link-lib=static=crypto");

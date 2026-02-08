@@ -78,11 +78,15 @@ if [ "$IS_WINDOWS" = "1" ]; then
   fi
 fi
 
-OPENSSL_CFLAGS="-O3 -march=native -mtune=native -flto -ffunction-sections -fdata-sections"
-LIBOQS_CFLAGS="-O3 -march=native -mtune=native -flto"
-if [ "$IS_WINDOWS" = "0" ]; then
-  OPENSSL_CFLAGS="$OPENSSL_CFLAGS -fno-semantic-interposition"
-  LIBOQS_CFLAGS="$LIBOQS_CFLAGS -fno-semantic-interposition"
+OPENSSL_CFLAGS="-O3 -march=native -mtune=native -ffunction-sections -fdata-sections"
+LIBOQS_CFLAGS="-O3 -march=native -mtune=native"
+CMAKE_IPO="ON"
+
+if [ "$IS_WINDOWS" = "1" ]; then
+  CMAKE_IPO="OFF"
+else
+  OPENSSL_CFLAGS="$OPENSSL_CFLAGS -flto -fno-semantic-interposition"
+  LIBOQS_CFLAGS="$LIBOQS_CFLAGS -flto -fno-semantic-interposition"
 fi
 
 mkdir -p "$OPENSSL_BASE" "$INSTALL_PREFIX"
@@ -188,7 +192,7 @@ if [ ! -f "$OQS_DIR/lib/liboqs.a" ]; then
     -DCMAKE_C_FLAGS="$LIBOQS_CFLAGS" \
     -DCMAKE_EXE_LINKER_FLAGS="$LIBOQS_LDFLAGS" \
     -DCMAKE_SHARED_LINKER_FLAGS="$LIBOQS_LDFLAGS" \
-    -DCMAKE_INTERPROCEDURAL_OPTIMIZATION=ON \
+    -DCMAKE_INTERPROCEDURAL_OPTIMIZATION="$CMAKE_IPO" \
     ..
 
   ninja && ninja install
