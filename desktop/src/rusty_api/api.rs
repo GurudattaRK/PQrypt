@@ -3,15 +3,18 @@
 use super::constants_errors::*;
 pub use super::constants_errors::secure_random_bytes;
 use openssl::hash::{hash, MessageDigest};
-use libc::c_int;
-use libc;
 use zeroize::Zeroize;
+use std::io::{Read, Write};
+
+#[cfg(unix)]
+use libc::{c_int, self};
 
 pub use super::password::{generate_password, derive_password_hash_secure};
 
 const FIXED_SALT: &[u8] = b"PQryptFixedSalt1"; // 16 bytes
 
 // MARK: double_encrypt_fd_raw (Android-compatible PQRYPT header + GCM trailer)
+#[cfg(unix)]
 #[inline(always)]
 pub fn double_encrypt_fd_raw(
     secret: &[u8],
@@ -118,6 +121,7 @@ pub fn double_encrypt_fd_raw(
 }
 
 // MARK: double_decrypt_fd_raw
+#[cfg(unix)]
 #[inline(always)]
 pub fn double_decrypt_fd_raw(
     secret: &[u8],
@@ -227,23 +231,179 @@ pub fn double_decrypt_fd_raw(
     Ok(())
 }
 
-// Path-based helpers (open files and call fd functions)
+// Path-based helpers (cross-platform using std::fs)
 #[inline(always)]
 pub fn encrypt_file_pqrypt(input_path: &str, output_path: &str, secret: &[u8]) -> Result<(), CryptoError> {
     use std::fs::File;
-    #[cfg(unix)] use std::os::unix::io::AsRawFd;
-    let in_f = File::open(input_path).map_err(|_| CryptoError::IOError)?;
-    let out_f = File::create(output_path).map_err(|_| CryptoError::IOError)?;
-    double_encrypt_fd_raw(secret, false, in_f.as_raw_fd(), out_f.as_raw_fd())
+    use crate::crypto_core::double_encrypt;
+
+    let mut in_f = File::open(input_path).map_err(|_| CryptoError::IOError)?;
+    let mut out_f = File::create(output_path).map_err(|_| CryptoError::IOError)?;
+
+    // STEP 1: Base secret = SHA-512(password || FIXED_SALT)
+    let mut buf = Vec::with_capacity(secret.len() + FIXED_SALT.len());
+    buf.extend_from_slice(secret);
+    buf.extend_from_slice(FIXED_SALT);
+    let mut base_secret = hash(MessageDigest::sha512(), &buf)
+        .map_err(|_| CryptoError::HashingFailed)?
+        .to_vec();
+
+    // STEP 2: Derive keys via SHA-256(base || label)
+    let mut chacha_key = [0u8; 32];
+    let ck = hash(MessageDigest::sha256(), &[&base_secret[..], b"CHACHA_KEY"].concat())
+        .map_err(|_| CryptoError::HashingFailed)?;
+    chacha_key.copy_from_slice(&ck[0..32]);
+
+    let mut aes_key = [0u8; 32];
+    let ak = hash(MessageDigest::sha256(), &[&base_secret[..], b"AES_KEY"].concat())
+        .map_err(|_| CryptoError::HashingFailed)?;
+    aes_key.copy_from_slice(&ak[0..32]);
+
+    // STEP 3: Random nonces per-encryption
+    let mut chacha_nonce = [0u8; 12];
+    secure_random_bytes(&mut chacha_nonce).map_err(|_| CryptoError::RandomGenerationFailed)?;
+    let mut aes_nonce = [0u8; 12];
+    secure_random_bytes(&mut aes_nonce).map_err(|_| CryptoError::RandomGenerationFailed)?;
+
+    // Read entire input file
+    let mut input_data = Vec::new();
+    in_f.read_to_end(&mut input_data).map_err(|_| CryptoError::IOError)?;
+
+    // Build fixed-size binary header (54 bytes)
+    let mut header = [0u8; 54];
+    header[0..6].copy_from_slice(b"PQRYPT");
+    header[6..14].copy_from_slice(&(input_data.len() as u64).to_le_bytes());
+    header[14..26].copy_from_slice(&aes_nonce);
+    header[26..38].copy_from_slice(&chacha_nonce);
+    header[38..54].copy_from_slice(&[0u8; 16]);
+
+    // Double encrypt the data with header as AAD
+    let (ciphertext, aes_tag) = double_encrypt(
+        &mut chacha_key,
+        &mut chacha_nonce,
+        &mut aes_key,
+        &mut aes_nonce,
+        &mut input_data,
+        &header,
+    ).map_err(|_| CryptoError::EncryptionFailed)?;
+
+    let mut ciphertext = ciphertext;
+
+    // Build GCM trailer (19 bytes): "GCM" + 16-byte tag
+    let mut gcm_trailer = [0u8; 19];
+    gcm_trailer[0..3].copy_from_slice(b"GCM");
+    gcm_trailer[3..19].copy_from_slice(&aes_tag);
+
+    // Write header, ciphertext, trailer
+    out_f.write_all(&header).map_err(|_| CryptoError::IOError)?;
+    out_f.write_all(&ciphertext).map_err(|_| CryptoError::IOError)?;
+    out_f.write_all(&gcm_trailer).map_err(|_| CryptoError::IOError)?;
+    out_f.sync_all().map_err(|_| CryptoError::IOError)?;
+
+    // Zeroize
+    ciphertext.zeroize();
+    input_data.zeroize();
+    base_secret.zeroize();
+    buf.zeroize();
+    chacha_key.zeroize();
+    chacha_nonce.zeroize();
+    aes_key.zeroize();
+    aes_nonce.zeroize();
+
+    Ok(())
 }
 
 #[inline(always)]
 pub fn decrypt_file_pqrypt(input_path: &str, output_path: &str, secret: &[u8]) -> Result<(), CryptoError> {
     use std::fs::File;
-    #[cfg(unix)] use std::os::unix::io::AsRawFd;
-    let in_f = File::open(input_path).map_err(|_| CryptoError::IOError)?;
-    let out_f = File::create(output_path).map_err(|_| CryptoError::IOError)?;
-    double_decrypt_fd_raw(secret, false, in_f.as_raw_fd(), out_f.as_raw_fd())
+    use crate::crypto_core::double_decrypt;
+
+    let mut in_f = File::open(input_path).map_err(|_| CryptoError::IOError)?;
+    let mut out_f = File::create(output_path).map_err(|_| CryptoError::IOError)?;
+
+    // Read all input data
+    let mut input_data = Vec::new();
+    in_f.read_to_end(&mut input_data).map_err(|_| CryptoError::IOError)?;
+
+    // Check minimum file size (54 header + 19 GCM = 73 bytes minimum)
+    if input_data.len() < 73 { return Err(CryptoError::InvalidInput); }
+
+    // Parse fixed binary header (54 bytes)
+    if &input_data[..6] != b"PQRYPT" { return Err(CryptoError::InvalidInput); }
+
+    let _original_size = u64::from_le_bytes(input_data[6..14].try_into().unwrap()) as usize;
+    let aes_nonce_bytes = &input_data[14..26];
+    let chacha_nonce_bytes = &input_data[26..38];
+
+    // Nonce validation (must not be all zeros)
+    if aes_nonce_bytes.iter().all(|&b| b == 0) || chacha_nonce_bytes.iter().all(|&b| b == 0) {
+        return Err(CryptoError::InvalidInput);
+    }
+
+    // Check GCM trailer (last 19 bytes)
+    let gcm_start = input_data.len() - 19;
+    if &input_data[gcm_start..gcm_start + 3] != b"GCM" { return Err(CryptoError::InvalidInput); }
+    let tag_slice = &input_data[gcm_start + 3..];
+
+    // Extract ciphertext
+    let ciphertext = &input_data[54..gcm_start];
+
+    // Base secret = SHA-512(password || FIXED_SALT)
+    let mut buf = Vec::with_capacity(secret.len() + FIXED_SALT.len());
+    buf.extend_from_slice(secret);
+    buf.extend_from_slice(FIXED_SALT);
+    let mut base_secret = hash(MessageDigest::sha512(), &buf)
+        .map_err(|_| CryptoError::HashingFailed)?
+        .to_vec();
+
+    // Derive keys via SHA-256(base || label)
+    let mut chacha_key = [0u8; 32];
+    let ck = hash(MessageDigest::sha256(), &[&base_secret[..], b"CHACHA_KEY"].concat())
+        .map_err(|_| CryptoError::HashingFailed)?;
+    chacha_key.copy_from_slice(&ck[0..32]);
+
+    let mut chacha_nonce = [0u8; 12];
+    chacha_nonce.copy_from_slice(chacha_nonce_bytes);
+
+    let mut aes_key = [0u8; 32];
+    let ak = hash(MessageDigest::sha256(), &[&base_secret[..], b"AES_KEY"].concat())
+        .map_err(|_| CryptoError::HashingFailed)?;
+    aes_key.copy_from_slice(&ak[0..32]);
+
+    let mut aes_nonce = [0u8; 12];
+    aes_nonce.copy_from_slice(aes_nonce_bytes);
+
+    let mut aes_tag = [0u8; 16];
+    aes_tag.copy_from_slice(tag_slice);
+
+    // Double decrypt the data
+    let mut ciphertext_copy = ciphertext.to_vec();
+    let mut plaintext = double_decrypt(
+        &mut aes_key,
+        &mut aes_nonce,
+        &mut aes_tag,
+        &mut chacha_key,
+        &mut chacha_nonce,
+        &mut ciphertext_copy,
+        &input_data[..54],
+    ).map_err(|_| CryptoError::DecryptionFailed)?;
+
+    // Write output
+    out_f.write_all(&plaintext).map_err(|_| CryptoError::IOError)?;
+    out_f.set_len(plaintext.len() as u64).map_err(|_| CryptoError::IOError)?;
+    out_f.sync_all().map_err(|_| CryptoError::IOError)?;
+
+    plaintext.zeroize();
+    ciphertext_copy.zeroize();
+    input_data.zeroize();
+    base_secret.zeroize();
+    buf.zeroize();
+    chacha_key.zeroize();
+    chacha_nonce.zeroize();
+    aes_key.zeroize();
+    aes_nonce.zeroize();
+    aes_tag.zeroize();
+    Ok(())
 }
 
 // MARK: derive_password_hash_unified_64

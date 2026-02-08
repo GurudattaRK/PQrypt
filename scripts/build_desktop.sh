@@ -72,6 +72,12 @@ else
   exit 1
 fi
 
+if [ "$IS_WINDOWS" = "1" ]; then
+  if [ -x "/usr/bin/perl" ]; then
+    export PATH="/usr/bin:$PATH"
+  fi
+fi
+
 OPENSSL_CFLAGS="-O3 -march=native -mtune=native -flto -ffunction-sections -fdata-sections"
 LIBOQS_CFLAGS="-O3 -march=native -mtune=native -flto"
 if [ "$IS_WINDOWS" = "0" ]; then
@@ -125,7 +131,12 @@ if [ ! -f "$LIBOQS_SRC/CMakeLists.txt" ]; then
   exit 1
 fi
 
-if [ ! -f "$OPENSSL_DIR/lib/libcrypto.a" ] || [ ! -f "$OPENSSL_DIR/lib/libssl.a" ]; then
+OPENSSL_LIB_SUBDIR="lib"
+if [ -d "$OPENSSL_DIR/lib64" ]; then
+  OPENSSL_LIB_SUBDIR="lib64"
+fi
+
+if [ ! -f "$OPENSSL_DIR/$OPENSSL_LIB_SUBDIR/libcrypto.a" ] || [ ! -f "$OPENSSL_DIR/$OPENSSL_LIB_SUBDIR/libssl.a" ]; then
   rm -rf "$OPENSSL_DIR"
 
   pushd "$OPENSSL_SRC" >/dev/null
@@ -149,8 +160,13 @@ if [ ! -f "$OPENSSL_DIR/lib/libcrypto.a" ] || [ ! -f "$OPENSSL_DIR/lib/libssl.a"
   popd >/dev/null
 fi
 
-if [ ! -f "$OPENSSL_DIR/lib/libcrypto.a" ] || [ ! -f "$OPENSSL_DIR/lib/libssl.a" ]; then
-  echo "Error: OpenSSL static build did not produce expected archives in $OPENSSL_DIR/lib" >&2
+OPENSSL_LIB_SUBDIR="lib"
+if [ -d "$OPENSSL_DIR/lib64" ]; then
+  OPENSSL_LIB_SUBDIR="lib64"
+fi
+
+if [ ! -f "$OPENSSL_DIR/$OPENSSL_LIB_SUBDIR/libcrypto.a" ] || [ ! -f "$OPENSSL_DIR/$OPENSSL_LIB_SUBDIR/libssl.a" ]; then
+  echo "Error: OpenSSL static build did not produce expected archives in $OPENSSL_DIR/$OPENSSL_LIB_SUBDIR" >&2
   exit 1
 fi
 
@@ -187,7 +203,7 @@ fi
 
 export OPENSSL_DIR
 export OPENSSL_STATIC=1
-export OPENSSL_LIB_DIR="$OPENSSL_DIR/lib"
+export OPENSSL_LIB_DIR="$OPENSSL_DIR/$OPENSSL_LIB_SUBDIR"
 export OPENSSL_INCLUDE_DIR="$OPENSSL_DIR/include"
 export OQS_DIR
 export PKG_CONFIG_PATH="$OQS_DIR/lib/pkgconfig:${PKG_CONFIG_PATH:-}"

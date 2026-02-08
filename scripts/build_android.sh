@@ -35,6 +35,12 @@ else
   NCPU="4"
 fi
 
+if [[ "$OS_NAME" == MINGW* || "$OS_NAME" == MSYS* || "$OS_NAME" == CYGWIN* ]]; then
+  if [ -x "/usr/bin/perl" ]; then
+    export PATH="/usr/bin:$PATH"
+  fi
+fi
+
 mkdir -p "$OPENSSL_BASE" "$INSTALL_PREFIX"
 
 if [ "$CLEAN" = "1" ]; then

@@ -100,25 +100,73 @@ PQRYPT_CLEAN=1 bash scripts/build_desktop.sh
 
 Windows build-from-source uses **MSYS2 (mingw64)** so OpenSSL + liboqs can be built as static **`.a`** archives.
 
-- Install MSYS2 and the mingw64 toolchain (bash/make/perl/cmake/ninja)
-- Ensure Rust is using the **GNU** toolchain (`x86_64-pc-windows-gnu`)
+Follow these steps exactly:
 
-Build Desktop (from scratch):
+1. Install MSYS2 from the official site.
 
-```bat
-set PQRYPT_CLEAN=1
-scripts\build_desktop_windows.bat
+2. Open the correct terminal:
+
+- In the Windows Start Menu, search for:
+  - `MSYS2 MinGW 64-bit`
+- Open that one (important). The shell prompt should mention `MINGW64`.
+
+3. Navigate to the PQrypt folder by following this:
+
+In MSYS2, Windows locations look like this:
+
+- `C:\` becomes `/c/`
+- `D:\` becomes `/d/`
+
+Example, if your folder is at `C:\Users\gurudatta\Documents\GitHub\PQrypt` then use below command to reach that location in MSYS2 MinGW terminal:
+
+```sh
+cd /c/Users/gurudatta/Documents/GitHub/PQrypt
 ```
 
-Build Android (from scratch, builds OpenSSL+liboqs for Android and installs to all connected devices):
+Verify you are in the right place by running ``` pwd ``` command which would then show if you are at correct location or not (example: ``` /c/Users/gurudatta/Documents/GitHub/PQrypt```)
 
-```bat
-set ANDROID_NDK_HOME=C:\Path\To\Android\Sdk\ndk\<version>
-set PQRYPT_CLEAN=1
-scripts\build_android_windows.bat
+4. Next, install required build tools inside MSYS2. Do that by Copy pasting this whole command:
+
+```sh
+pacman -Syu && pacman -S --needed git mingw-w64-x86_64-toolchain mingw-w64-x86_64-cmake mingw-w64-x86_64-ninja mingw-w64-x86_64-make mingw-w64-x86_64-perl perl mingw-w64-x86_64-rust
+```
+
+5. Ensure OpenSSL uses the correct `perl`.
+
+OpenSSL `Configure` will fail if `perl` is the Windows one. So, Force MSYS perl by running these commands one by one:
+
+```sh
+export PATH="/usr/bin:$PATH" && hash -r
+which perl
+perl -V:osname
+```
+
+6. Ensure Rust is using the **GNU** toolchain.
+
+In MSYS2 MinGW64, Rust should be `x86_64-pc-windows-gnu` (not MSVC), To ensure that install and select the GNU toolchain by running these commands one by one:
+
+```sh
+rustup toolchain install stable-gnu
+rustup default stable-gnu
+rustc -Vv | grep host
+```
+
+7. Build Desktop (from scratch).
+
+assuming you are at root of project (Example: ``` /c/Users/gurudatta/Documents/GitHub/PQrypt```), run this command and wait for it to finish (it may take a long time) :
+
+```sh
+PQRYPT_CLEAN=1 bash scripts/build_desktop.sh
 ```
 
 ### 📱 Build the Android app from source
+
+Before you start You must set `ANDROID_NDK_HOME` (example path shown):
+
+```sh
+export ANDROID_NDK_HOME=/c/Path/To/Android/Sdk/ndk/<version>
+```
+You find this path using your installed Android Studio path. If you don't have Android studio then: 
 
 1. **Install Android Studio** from [developer.android.com](https://developer.android.com/studio)
 
@@ -133,7 +181,7 @@ scripts\build_android_windows.bat
    - Install NDK version 25 or higher
    - Install CMake 3.22.1
 
-4. **Run `build_android.sh` to Build and Install (this works on Linux & macOS but its unstable on Windows)**:
+4. **Run `build_android.sh` to Build and Install**:
 ```bash
 PQRYPT_CLEAN=1 bash scripts/build_android.sh
 ```
@@ -141,7 +189,7 @@ PQRYPT_CLEAN=1 bash scripts/build_android.sh
 This builds:
 - OpenSSL static libs for Android into `Openssl/static_libs/openssl-3.6-android/`
 - liboqs static libs for Android into `Openssl/static_libs/liboqs-0.15-android/`
-- the Android debug APK, then installs it to all connected devices
+- the Android debug APK, This APK file can be found in `android/app/build/outputs/apk/debug/` and it can be used to install the app on Android devices.
 
 
 
